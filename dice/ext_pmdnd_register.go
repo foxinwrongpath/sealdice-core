@@ -1,0 +1,56 @@
+package dice
+
+func RegisterBuiltinExtPmdnd(self *Dice) {
+	// 所有命令变量在其他文件中定义，这里只做注册
+	theExt := &ExtInfo{
+		Name:       "pmdnd",
+		Version:    "1.0.0",
+		Brief:      "提供PMDnD规则TRPG支持 - 宝可梦主题d20系统",
+		Author:     "Opnarrde",
+		AutoActive: true,
+		Official:   true,
+		OnCommandReceived: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) {
+		},
+		GetDescText: GetExtensionDesc,
+		CmdMap: CmdMapCls{
+			"pmdnd":      cmdPmdnd,
+			"pmdndx":     cmdPmdnd,
+			"ri":         cmdRi,
+			"init":       cmdInit,
+			"st":         cmdSt,
+			"dst":        cmdSt,
+			"rc":         cmdRc,
+			"ra":         cmdRc,
+			"rah":        cmdRc,
+			"rch":        cmdRc,
+			"drc":        cmdRc,
+			"cast":       cmdCast,
+			"dcst":       cmdCast,
+			"环位":         cmdRing,
+			"ring":       cmdRing,
+			"dring":      cmdRing,
+			"长休":         cmdLongRest,
+			"短休":         cmdLongRest,
+			"longrest":   cmdLongRest,
+			"dlongrest":  cmdLongRest,
+			"shortrest":  cmdShortRest,
+			"dshortrest": cmdShortRest,
+			"type":       cmdType,
+			"dtype":      cmdType,
+			"dmg":        cmdDmg,
+			"ddmg":       cmdDmg,
+			"stab":       cmdStab,
+			"dstab":      cmdStab,
+			"move":       cmdMove,
+			"dmove":      cmdMove,
+			"行动":         cmdAction,
+			"action":     cmdAction,
+			"daction":    cmdAction,
+			"暴击":         cmdCrit,
+			"crit":       cmdCrit,
+			"暴擊":         cmdCrit,
+			"dcrit":      cmdCrit,
+		},
+	}
+	self.RegisterExtension(theExt)
+}

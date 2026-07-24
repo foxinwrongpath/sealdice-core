@@ -115,6 +115,10 @@ func TestDynamicFileCoreWritesQueryLoggerIntoDatabaseFile(t *testing.T) {
 		t.Fatalf("expected query logger write to succeed, got error: %v", err)
 	}
 
+	// 关闭所有底层写入器，释放文件句柄
+	closeDynamicFileCore(fileCore)
+
+	// 然后进行断言
 	fileCore.mu.RLock()
 	defer fileCore.mu.RUnlock()
 	if _, exists := fileCore.writerMap[LogKeyDatabaseQuery]; exists {
@@ -122,6 +126,22 @@ func TestDynamicFileCoreWritesQueryLoggerIntoDatabaseFile(t *testing.T) {
 	}
 	if _, exists := fileCore.writerMap[LogKeyDatabase]; !exists {
 		t.Fatalf("expected query logger to write through %s file writer", LogKeyDatabase)
+	}
+}
+
+// 在测试函数中或文件内添加
+func closeDynamicFileCore(fc *dynamicFileCore) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	for _, w := range fc.writerMap {
+		// 尝试关闭，忽略错误
+		if closer, ok := w.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+		// 有些写入器可能还需要 Sync
+		if syncer, ok := w.(interface{ Sync() error }); ok {
+			_ = syncer.Sync()
+		}
 	}
 }
 

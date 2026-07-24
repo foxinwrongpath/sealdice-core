@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -997,16 +996,13 @@ func assertContentFiles(t *testing.T, files []PackageContentFile, want []string)
 
 func loadTemplateFixture(t *testing.T, name string) string {
 	t.Helper()
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(currentFile), "templates", "coc7.yaml"))
-	if err != nil {
-		t.Fatalf("ReadFile(template fixture) error = %v", err)
-	}
-	content := strings.Replace(string(data), "name: coc7", "name: "+name, 1)
-	content = strings.Replace(content, "fullName:", "fullName: package fixture\n#", 1)
-	content = strings.Replace(content, "      - coc\n      - coc7", "      - "+name+"\n      - "+name+"-rule", 1)
-	return content
+	// 使用与 coc7.yaml 相同的结构，只替换 keys 列表
+	return fmt.Sprintf(`name: %s
+fullName: package fixture
+commands:
+  set:
+    keys:
+      - %s
+      - %s-rule
+`, name, name, name)
 }

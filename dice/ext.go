@@ -126,6 +126,7 @@ func (d *Dice) RegisterBuiltinExt() {
 	RegisterBuiltinExtDeck(d)
 	RegisterBuiltinExtReply(d)
 	RegisterBuiltinExtDnd5e(d)
+	RegisterBuiltinExtPmdnd(d)
 	RegisterBuiltinStory(d)
 	RegisterBuiltinExtExp(d)
 	RegisterBuiltinExtCore(d)
@@ -134,7 +135,7 @@ func (d *Dice) RegisterBuiltinExt() {
 }
 
 func (d *Dice) RegisterBuiltinSystemTemplate() {
-	for _, asset := range []string{"coc7.yaml", "dnd5e.yaml"} {
+	for _, asset := range []string{"coc7.yaml", "dnd5e.yaml", "pmdnd.yaml"} {
 		tmpl, err := loadBuiltinTemplate(asset)
 		if err != nil {
 			if d.Logger != nil {

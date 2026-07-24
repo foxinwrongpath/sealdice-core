@@ -141,7 +141,7 @@ func onReady() {
 		case <-mOpen.ClickedCh:
 			_ = exec.Command(`cmd`, `/c`, `start`, `http://localhost:`+_trayPortStr).Start()
 		case <-mOpenExeDir.ClickedCh:
-			_ = exec.Command(`cmd`, `/c`, `explorer`, filepath.Dir(os.Args[0])).Start()
+			_ = exec.Command(`cmd`, `/c`, `explorer`, filepath.Dir(os.Args[0])).Start() // #nosec G702
 		case <-mQuit.ClickedCh:
 			systray.Quit()
 			systrayQuited = true
@@ -266,7 +266,7 @@ func showMsgBox(title string, message string) {
 }
 
 func executeWin(name string, arg ...string) *exec.Cmd {
-	cmd := exec.Command(name, arg...)
+	cmd := exec.Command(name, arg...) // #nosec G702
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		// CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS,
 		CreationFlags:    windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NEW_CONSOLE,
