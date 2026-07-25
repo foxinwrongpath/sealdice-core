@@ -1,14 +1,27 @@
 package dice
 
+import "fmt"
+
 // DamageResult 伤害计算结果
 type DamageResult struct {
-	BaseDmg  int64   // 基础伤害（未修正）
-	FinalDmg int64   // 最终伤害（已修正）
-	D20      int64   // d20 出目
-	CritText string  // 暴击/大失败文本
-	RollPct  int64   // 攻击掷骰百分比
-	StabMul  float64 // STAB 倍率
-	TypeMod  float64 // 属性克制修正
+	BaseDmg    int64   // 基础伤害（未修正）
+	FinalDmg   int64   // 最终伤害（已修正）
+	D20        int64   // d20 出目
+	CritText   string  // 暴击/大失败文本
+	RollPct    int64   // 攻击掷骰百分比
+	StabMul    float64 // STAB 倍率
+	TypeMod    float64 // 属性克制修正
+	EffectText string  // 效果文本（"效果拔群！"等）
+	Hit        bool    // 是否命中
+	Crit       bool    // 是否暴击
+	MoveName   string  // 招式名称（用于输出）
+	Attacker   string  // 攻击者名称
+	Defender   string  // 防御者名称
+	Power      int64   // 招式威力
+	AtkType    string  // 攻击属性
+	AtkVal     int64   // 攻击值
+	DefVal     int64   // 防御值
+	BattleLv   int64   // 战斗等级
 }
 
 // calculateDamage 计算伤害
@@ -84,7 +97,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 
 	// ----- 3. 获取战斗等级 -----
-	battleLv := int64(1)
+	battleLv := int64(30)
 	if v, _ := VarGetValueInt64(attackerCtx, "战斗等级"); v != 0 {
 		battleLv = v
 	}
@@ -196,6 +209,38 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		finalDmg = int64(float64(totalDmg) * factor)
 	}
 	result.FinalDmg = finalDmg
+
+	// ----- 10. 填充结果字段 -----
+	result.Attacker = attacker
+	result.Defender = defender
+	result.Power = power
+	result.AtkType = atkType
+	result.AtkVal = atkVal
+	result.DefVal = defVal
+	result.BattleLv = battleLv
+	result.Hit = rollPct > 0
+	result.Crit = result.CritText != "" && result.CritText != "【大失败】"
+
+	// 计算总修正系数
+	totalFactor := 1.0
+	if typeMod != 0 || stabMul != 1.0 {
+		factor := (2.0 + typeMod) / 2.0
+		if factor < 0.25 {
+			factor = 0.25
+		}
+		totalFactor = factor * stabMul
+	}
+
+	// 判定效果文本
+	if finalDmg == 0 && rollPct != 0 {
+		result.EffectText = fmt.Sprintf("对 %s 没有效果……", defender)
+	} else if totalFactor >= 2.0 {
+		result.EffectText = "效果拔群！"
+	} else if totalFactor <= 0.5 && totalFactor > 0 {
+		result.EffectText = "效果不彰……"
+	} else {
+		result.EffectText = ""
+	}
 
 	return result, ""
 }

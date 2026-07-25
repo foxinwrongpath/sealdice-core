@@ -114,12 +114,32 @@ var cmdNPC = &CmdItemInfo{
 	Name:      "npc",
 	ShortHelp: ".npc set <名称> <属性1>:<值1> [<属性2>:<值2> ...]\n.npc show <名称>\n.npc list\n.npc del <名称>\n.npc clear",
 	Help: "PMDnD NPC 管理:\n" +
-		".npc set <名称> <属性1>:<值1> [<属性2>:<值2> ...] // 创建/更新NPC属性，例: .npc set 圈圈熊 patk:30 pdef:20 type_格斗:1\n" +
-		".npc show <名称> // 查看NPC属性\n" +
-		".npc list // 列出所有NPC名称\n" +
-		".npc del <名称> // 删除某个NPC\n" +
-		".npc clear // 清除所有NPC\n" +
-		"支持属性: patk, pdef, satk, sdef, spd, type_*, stab_* 等",
+		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"📌 作用: 为战斗中的NPC设置临时属性，让 @NPC 能正确读取数值。\n" +
+		"\n" +
+		"📖 语法:\n" +
+		"  .npc set <名称> <属性1>:<值1> [<属性2>:<值2> ...]\n" +
+		"  .npc show <名称>\n" +
+		"  .npc list\n" +
+		"  .npc del <名称>\n" +
+		"  .npc clear\n" +
+		"\n" +
+		"📝 示例:\n" +
+		"  .npc set 圈圈熊 patk:30 pdef:20 type_格斗:1\n" +
+		"  .npc set 大嘴蝠 patk:15 pdef:10 satk:25 sdef:12 type_飞行:1 type_毒:1\n" +
+		"  .npc list\n" +
+		"  .npc show 圈圈熊\n" +
+		"\n" +
+		"⚔️ 战斗中使用:\n" +
+		"  .dmg 80 格斗 物 @圈圈熊 @伊布    # 自动读取圈圈熊的 patk\n" +
+		"  .move attack 撞击 @大嘴蝠         # 自动读取大嘴蝠的 pdef\n" +
+		"\n" +
+		"🗑️ 删除:\n" +
+		"  .npc del 圈圈熊\n" +
+		"  .npc clear                         # 清除所有NPC\n" +
+		"\n" +
+		"📋 支持属性: patk, pdef, satk, sdef, spd, type_*, stab_*\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		sub := cmdArgs.GetArgN(1)

@@ -2,62 +2,112 @@ package dice
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 )
 
+// ---------- .dmg 帮助函数 ----------
+func getDmgHelp() string {
+	return "PMDnD 伤害计算(.dmg):\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+		".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n" +
+		"  例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊\n" +
+		"  例: .dmg 格斗 80 物 @圈圈熊 @伊布\n" +
+		"  例: .dmg 水 60 特 优势\n" +
+		"\n" +
+		"👾 NPC使用: 先用 .npc set <名称> <属性>:<值> 设置NPC属性\n" +
+		"   然后 @NPC 即可自动读取攻击/防御数值\n" +
+		"   例: .npc set 圈圈熊 patk:30 pdef:20\n" +
+		"       .dmg 格斗 80 物 @圈圈熊 @伊布\n" +
+		"\n" +
+		"📋 参数说明:\n" +
+		"  类型: 攻击的属性（火/水/草/格斗/一般等）\n" +
+		"  威力: 招式的威力值（数字）\n" +
+		"  物/特: 物理攻击或特殊攻击（默认物理）\n" +
+		"  优势/劣势: d20掷骰的优势或劣势\n" +
+		"  暴击阈值: 触发暴击的d20出目（默认20）\n" +
+		"  @攻击者: 攻击者名称（默认自己）\n" +
+		"  @防御者: 防御者名称\n" +
+		"\n" +
+		"💡 不指定 @防御者 时自动从先攻列表选取\n" +
+		"💡 不指定 @攻击者 时默认为自己\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+func getDmgShortHelp() string {
+	return ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n" +
+		"示例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊\n" +
+		"👾 NPC使用: .npc set 圈圈熊 patk:30 pdef:20 后自动读取"
+}
+
+// ---------- .dmg 命令 ----------
 var cmdDmg = &CmdItemInfo{
-	Name:      "dmg",
-	ShortHelp: ".dmg <威力> <类型> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n示例: .dmg 80 火 物 优势 19 @伊布 @圈圈熊\n💡 NPC处理技巧: @NPC 会读取你的属性（因NPC无独立存储）。\n   - 模拟NPC攻击：先用 .st patk:X satk:Y 修改自身为NPC攻击值，再用 @自己 @目标\n   - 模拟PC打NPC：先用 .st pdef:X sdef:Y 修改自身为NPC防御值，再用 @攻击者 @自己\n   - 嫌麻烦也可以直接手算，或由DM口述结果。",
-	Help: "PMDnD 伤害计算(.dmg):\n" +
-		".dmg <威力> <类型> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n示例: .dmg 80 火 物 优势 19 @伊布 @圈圈熊\n💡 NPC处理技巧: @NPC 会读取你的属性（因NPC无独立存储）。\n   - 模拟NPC攻击：先用 .st patk:X satk:Y 修改自身为NPC攻击值，再用 @自己 @目标\n   - 模拟PC打NPC：先用 .st pdef:X sdef:Y 修改自身为NPC防御值，再用 @攻击者 @自己\n   - 嫌麻烦也可以直接手算，或由DM口述结果。",
+	Name:          "dmg",
+	ShortHelp:     ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n示例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊",
+	Help:          getDmgHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
-		clean := cmdArgs.CleanArgs
-		re := regexp.MustCompile(`(\d+)\s+([^\s@]+)\s*(物|特|物理|特殊)?\s*(优势|劣势)?\s*(\d{1,2})?\s*(@\S+)?\s*(@\S+)?`)
-		matches := re.FindStringSubmatch(clean)
-		if len(matches) < 3 {
-			ReplyToSender(ctx, msg, "格式错误，正确格式: .dmg <威力> <类型> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]")
+		// 检查是否请求帮助
+		if cmdArgs.IsArgEqual(1, "help") {
+			ReplyToSender(ctx, msg, getDmgHelp())
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		power, err := strconv.ParseInt(matches[1], 10, 64)
-		if err != nil {
-			ReplyToSender(ctx, msg, "威力必须是数字: "+matches[1])
+		parts := strings.Fields(cmdArgs.CleanArgs)
+		if len(parts) < 2 {
+			ReplyToSender(ctx, msg, getDmgHelp())
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		atkType := getPMDnDType(matches[2])
+		// 新格式: <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]
+		atkType := getPMDnDType(parts[0])
 		if _, ok := pmdndTypeChart[atkType]; !ok {
-			ReplyToSender(ctx, msg, fmt.Sprintf("未知类型: %s，可用类型: %s", matches[2], strings.Join(pmdndTypeNames, " ")))
+			ReplyToSender(ctx, msg, fmt.Sprintf("未知类型: %s，可用类型: %s", parts[0], strings.Join(pmdndTypeNames, " ")))
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
+		power, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			ReplyToSender(ctx, msg, "威力必须是数字: "+parts[1])
+			return CmdExecuteResult{Matched: true, Solved: true}
+		}
+
+		// 解析剩余参数
 		isSpecial := false
-		if len(matches) > 3 && matches[3] != "" {
-			isSpecial = matches[3] == "特" || matches[3] == "特殊"
-		}
-
 		advantage := ""
-		if len(matches) > 4 && matches[4] != "" {
-			advantage = matches[4]
-		}
-
 		ctLimit := int64(20)
-		if len(matches) > 5 && matches[5] != "" {
-			if n, e := strconv.ParseInt(matches[5], 10, 64); e == nil && n >= 2 && n <= 20 {
-				ctLimit = n
+		attacker := ctx.Player.Name
+		defender := ""
+
+		for i := 2; i < len(parts); i++ {
+			p := parts[i]
+			switch {
+			case p == "物" || p == "物理" || p == "p" || p == "physical":
+				isSpecial = false
+			case p == "特" || p == "特殊" || p == "s" || p == "special":
+				isSpecial = true
+			case p == "优势" || p == "優勢" || p == "adv" || p == "advantage":
+				advantage = "优势"
+			case p == "劣势" || p == "劣勢" || p == "dis" || p == "disadvantage":
+				advantage = "劣势"
+			case strings.HasPrefix(p, "@"):
+				target := strings.TrimPrefix(p, "@")
+				if defender == "" {
+					defender = target
+				} else {
+					// 第二个 @ 作为攻击者
+					attacker = target
+				}
+			default:
+				if n, e := strconv.ParseInt(p, 10, 64); e == nil && n >= 2 && n <= 20 {
+					ctLimit = n
+				}
 			}
 		}
 
-		attacker := ctx.Player.Name
-		defender := ""
-		if len(matches) > 6 && matches[6] != "" {
-			attacker = strings.TrimPrefix(matches[6], "@")
-		}
-		if len(matches) > 7 && matches[7] != "" {
-			defender = strings.TrimPrefix(matches[7], "@")
+		// 如果只指定了防御者，攻击者保持为当前玩家
+		if defender != "" && attacker == ctx.Player.Name {
+			// 正常情况
 		}
 
 		if defender == "" {
@@ -84,65 +134,80 @@ var cmdDmg = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		atkLabel := "物攻"
-		defLabel := "物防"
-		if isSpecial {
-			atkLabel = "特攻"
-			defLabel = "特防"
+		// ========== 输出格式 ==========
+		var calcText strings.Builder
+		fmt.Fprintf(&calcText, "( %s -> %s | %s", attacker, defender, atkType)
+
+		if advantage != "" {
+			fmt.Fprintf(&calcText, " | d20%s=%d", advantage, result.D20)
+		} else {
+			fmt.Fprintf(&calcText, " | d20=%d", result.D20)
+		}
+		if result.CritText != "" {
+			fmt.Fprintf(&calcText, " %s", result.CritText)
 		}
 
-		atkVal := int64(10)
-		if isSpecial {
-			atkVal, _ = VarGetValueInt64(mctx, "satk")
-		} else {
-			atkVal, _ = VarGetValueInt64(mctx, "patk")
-		}
-		if atkVal == 0 {
-			atkVal = 10
-		}
-		defVal := int64(10)
-		defCtx := ctx
-		if defender != "" && defender != attacker {
-			defCtx = ctx
-		}
-		if isSpecial {
-			defVal, _ = VarGetValueInt64(defCtx, "sdef")
-		} else {
-			defVal, _ = VarGetValueInt64(defCtx, "pdef")
-		}
-		if defVal == 0 {
-			defVal = 10
-		}
-		battleLv := int64(1)
-		if v, _ := VarGetValueInt64(mctx, "战斗等级"); v != 0 {
-			battleLv = v
+		if !result.Hit {
+			fmt.Fprintf(&calcText, " )")
+			ReplyToSender(ctx, msg, calcText.String()+"\n"+
+				fmt.Sprintf("%s 对 %s 使用了 %s 攻击！\n但是攻击没有命中……",
+					attacker, defender, atkType))
+			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		text := fmt.Sprintf("%s的%s(威力%d) d20 %d%s\n",
-			attacker, atkType, power, result.D20, result.CritText)
-		text += fmt.Sprintf("基础伤害 = %d * %d(战斗等级) * %d(%s) * %d%% / (100 * %d(%s)) = %d",
-			power, battleLv, atkVal, atkLabel, result.RollPct, defVal, defLabel, result.BaseDmg)
-		if result.TypeMod != 0 || result.StabMul != 1.0 {
-			text += fmt.Sprintf("\n修正: STAB x%.2f, 克制 x%.2f => 最终伤害 %d",
-				result.StabMul, (2.0+result.TypeMod)/2.0, result.FinalDmg)
-		}
-		if atkType != "一般" && defender != "" {
-			if mod, ok := pmdndTypeChart[atkType][atkType]; ok && mod != 0 {
-				text += fmt.Sprintf("\n提示: %s系对%s系 %s", atkType, atkType, getTypeEffectivenessText(mod))
+		fmt.Fprintf(&calcText, " | 基础: %d*%d*%d*%d%%/(100*%d)=%d",
+			power, result.BattleLv, result.AtkVal, result.RollPct, result.DefVal, result.BaseDmg)
+
+		if result.StabMul != 1.0 || result.TypeMod != 0 {
+			factor := (2.0 + result.TypeMod) / 2.0
+			if factor < 0.25 {
+				factor = 0.25
+			}
+			fmt.Fprintf(&calcText, " | STAB x%.2f, 克制 x%.2f", result.StabMul, factor)
+			if result.FinalDmg != result.BaseDmg {
+				fmt.Fprintf(&calcText, " => %d", result.FinalDmg)
 			}
 		}
+		fmt.Fprintf(&calcText, " )")
 
-		ReplyToSender(ctx, msg, text)
+		// 战斗演说
+		var flavorText strings.Builder
+		if attacker == defender {
+			fmt.Fprintf(&flavorText, "%s 使用了 %s 攻击自己！\n", attacker, atkType)
+		} else {
+			fmt.Fprintf(&flavorText, "%s 对 %s 使用了 %s 攻击！\n", attacker, defender, atkType)
+		}
+
+		if result.Crit {
+			fmt.Fprintf(&flavorText, "命中要害！\n")
+		}
+		if result.EffectText != "" {
+			fmt.Fprintf(&flavorText, "%s\n", result.EffectText)
+		}
+		if result.FinalDmg == 0 {
+			fmt.Fprintf(&flavorText, "对 %s 没有造成伤害……", defender)
+		} else {
+			fmt.Fprintf(&flavorText, "%s 受到了 %d 点伤害！", defender, result.FinalDmg)
+		}
+
+		fullText := calcText.String() + "\n" + flavorText.String()
+		ReplyToSender(ctx, msg, fullText)
 		return CmdExecuteResult{Matched: true, Solved: true}
 	},
 }
 
+// ---------- .stab 命令 ----------
 var cmdStab = &CmdItemInfo{
 	Name:          "stab",
 	ShortHelp:     ".stab <招式类型> // 查询自身STAB\n.stab <招式类型> @某人 // 查询他人STAB\n.stab list // 列出自身属性类型",
 	Help:          "PMDnD 本系加成(.stab):\n.stab <招式类型> // 查询自身STAB\n.stab <招式类型> @某人 // 查询他人STAB\n.stab list // 列出自身属性类型",
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
+		// 检查是否请求帮助
+		if cmdArgs.IsArgEqual(1, "help") {
+			return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
+		}
+
 		mctx := GetCtxProxyFirst(ctx, cmdArgs)
 		val := cmdArgs.GetArgN(1)
 		switch val {
@@ -201,11 +266,17 @@ var cmdStab = &CmdItemInfo{
 	},
 }
 
+// ---------- .type 命令 ----------
 var cmdType = &CmdItemInfo{
 	Name:      "type",
 	ShortHelp: ".type <技能类型> @<目标类型> // 查单一克制关系\n.type <技能类型> // 查该类型对所有类型的克制关系\n.type list // 列出所有类型",
 	Help:      "PMDnD 类型克制(.type):\n.type <技能类型> @<目标类型> // 查单一克制关系\n.type <技能类型> // 查该类型对所有类型的克制关系\n.type list // 列出所有类型",
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
+		// 检查是否请求帮助
+		if cmdArgs.IsArgEqual(1, "help") {
+			return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
+		}
+
 		val := cmdArgs.GetArgN(1)
 		switch val {
 		case "", "help":
@@ -246,12 +317,26 @@ var cmdType = &CmdItemInfo{
 	},
 }
 
+// ---------- .暴击 / .crit 命令 ----------
+func getCritHelp() string {
+	return "PMDnD 暴击判定(.暴击 .crit):\n" +
+		".暴击 [阈值] [优势/劣势]     判定暴击，默认阈值20\n" +
+		".crit [阈值] [优势/劣势]     同.暴击\n" +
+		"  例: .crit 19               暴击阈值19\n" +
+		"  例: .crit 20 优势          d20优势，暴击阈值20"
+}
+
 var cmdCrit = &CmdItemInfo{
 	Name:      "暴击",
-	ShortHelp: ".暴击 [阈值] // 判定暴击，默认阈值20\n.crit [阈值] [优势/劣势] // d20暴击判定\n.crit 19 // 暴击阈值19\n.crit 20 优势 // d20优势，暴击阈值20",
-	Help: "PMDnD 暴击判定(.暴击 .crit):\n" +
-		".暴击 [阈值] // 判定暴击，默认阈值20\n.crit [阈值] [优势/劣势] // d20暴击判定\n.crit 19 // 暴击阈值19\n.crit 20 优势 // d20优势，暴击阈值20",
+	ShortHelp: ".暴击 [阈值] [优势/劣势] // 暴击判定\n.crit [阈值] [优势/劣势] // 同.暴击",
+	Help:      getCritHelp(),
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
+		// 检查是否请求帮助
+		if cmdArgs.IsArgEqual(1, "help") {
+			ReplyToSender(ctx, msg, getCritHelp())
+			return CmdExecuteResult{Matched: true, Solved: true}
+		}
+
 		ctLimit := int64(20)
 		advantage := ""
 

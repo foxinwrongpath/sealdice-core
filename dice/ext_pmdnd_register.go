@@ -13,6 +13,8 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 		GetDescText: GetExtensionDesc,
 		CmdMap: CmdMapCls{
 			// 核心命令（标准化）
+			"pmdnd":  cmdPmdnd,
+			"pmdndx": cmdPmdnd,
 			"st":     cmdSt,
 			"rc":     cmdRc,
 			"ring":   cmdRing,
@@ -24,18 +26,19 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 			"crit":   cmdCrit,
 			"init":   cmdInit,
 			"action": cmdAction,
-			"gen":    cmdGen,
 			"npc":    cmdNPC,
+			"ds":     cmdDs,
 
 			// 中文别名（保留方便习惯）
-			"属性": cmdSt,
-			"环位": cmdRing,
-			"长休": cmdRestAliasLong,
-			"短休": cmdRestAliasShort,
-			"暴击": cmdCrit,
-			"行动": cmdAction,
+			"属性":   cmdSt,
+			"环位":   cmdRing,
+			"长休":   cmdRestAliasLong,
+			"短休":   cmdRestAliasShort,
+			"暴击":   cmdCrit,
+			"行动":   cmdAction,
+			"死亡豁免": cmdDs,
 
-			// 旧指令保留以兼容（但不推荐）
+			// 旧指令保留以兼容
 			"dst":       cmdSt,
 			"ra":        cmdRc,
 			"rah":       cmdRc,
@@ -43,8 +46,6 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 			"cast":      cmdRing,
 			"longrest":  cmdRest,
 			"shortrest": cmdRest,
-			"pmdnd":     cmdGen,
-			"pmdndx":    cmdGen,
 			"ri":        cmdInit,
 			"drc":       cmdRc,
 			"dstab":     cmdStab,

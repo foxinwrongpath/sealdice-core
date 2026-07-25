@@ -10,9 +10,24 @@ import (
 
 var cmdMove = &CmdItemInfo{
 	Name:      "move",
-	ShortHelp: ".move // 查看招式列表\n.move add <名称> <威力> <类型> <环位> <物/特> // 添加招式\n.move add 火花 40 火 1 特\n.move del <名称> // 删除招式\n.move use <名称> // 仅消耗PP和环位，不计算伤害\n.move attack <名称> [@目标] [优势/劣势] [暴击阈值] // 攻击！自动计算伤害\n💡 目标为NPC时，防御属性取你的当前值。\n   - 建议DM先用 .st pdef:X sdef:Y 临时设置自身属性来模拟NPC防御。\n.move pp <名称> +/-N // 修改招式PP\n.move clr // 清除所有招式",
+	ShortHelp: ".move // 查看招式列表\n.move add <名称> <威力> <类型> <环位> <物/特> // 添加招式\n.move add 火花 40 火 1 特\n.move del <名称> // 删除招式\n.move use <名称> // 仅消耗PP和环位，不计算伤害\n.move attack <名称> [@目标] [优势/劣势] [暴击阈值] // 攻击！自动计算伤害\n💡 NPC使用: .npc set <名称> <属性>:<值> 设置NPC属性后，@NPC自动读取\n.move pp <名称> +/-N // 修改招式PP\n.move clr // 清除所有招式",
 	Help: "PMDnD 招式管理(.move):\n" +
-		".move // 查看招式列表\n.move add <名称> <威力> <类型> <环位> <物/特> // 添加招式\n.move add 火花 40 火 1 特\n.move del <名称> // 删除招式\n.move use <名称> // 仅消耗PP和环位，不计算伤害\n.move attack <名称> [@目标] [优势/劣势] [暴击阈值] // 攻击！自动计算伤害\n💡 目标为NPC时，防御属性取你的当前值。\n   - 建议DM先用 .st pdef:X sdef:Y 临时设置自身属性来模拟NPC防御。\n.move pp <名称> +/-N // 修改招式PP\n.move clr // 清除所有招式",
+		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+		".move                       查看招式列表\n" +
+		".move add <名称> <威力> <类型> <环位> <物/特>  添加招式\n" +
+		"  例: .move add 火花 40 火 1 特\n" +
+		".move del <名称>            删除招式\n" +
+		".move use <名称>            消耗PP和环位（不计算伤害）\n" +
+		".move attack <名称> [@目标] [优势/劣势] [暴击阈值]  攻击！自动计算伤害\n" +
+		"  例: .move attack 撞击 @圈圈熊 优势 19\n" +
+		".move pp <名称> +/-N        修改招式PP\n" +
+		".move clr                   清除所有招式\n" +
+		"\n" +
+		"👾 NPC使用: 先用 .npc set <名称> <属性>:<值> 设置NPC属性，\n" +
+		"   然后 .move attack 招式名 @NPC 即可自动读取NPC的防御属性。\n" +
+		"   例: .npc set 圈圈熊 pdef:20 sdef:15\n" +
+		"       .move attack 撞击 @圈圈熊\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		cmdArgs.ChopPrefixToArgsWith("add", "del", "use", "attack", "atk", "pp", "rm")
@@ -129,10 +144,10 @@ var cmdMove = &CmdItemInfo{
 			category := catV.ToString()
 			ppV, _ := dd.Dict.Load("pp")
 			pp, _ := ppV.ReadInt()
-			ringV, _ := dd.Dict.Load("ring")
-			ring, _ := ringV.ReadInt()
 			ppmaxV, _ := dd.Dict.Load("ppmax")
 			ppmax, _ := ppmaxV.ReadInt()
+			ringV, _ := dd.Dict.Load("ring")
+			ring, _ := ringV.ReadInt()
 
 			if pp <= 0 {
 				ReplyToSender(mctx, msg, fmt.Sprintf("招式%s PP不足，当前%d", name, pp))
@@ -176,71 +191,81 @@ var cmdMove = &CmdItemInfo{
 				defender = "目标"
 			}
 
+			// ----- 消耗资源（先消耗环位，再消耗 PP） -----
+			ringText, ok := spellRingsGet(mctx, int64(ring), -1)
+			if !ok {
+				ReplyToSender(mctx, msg, fmt.Sprintf("环位不足: %s", ringText))
+				return CmdExecuteResult{Matched: true, Solved: true}
+			}
 			dd.Dict.Store("pp", ds.NewIntVal(pp-1))
 
+			// ----- 计算伤害 -----
 			result, errMsg := calculateDamage(mctx, int64(power), elemType, isSpecial, advantage, ctLimit, attacker, defender)
 			if errMsg != "" {
 				ReplyToSender(mctx, msg, errMsg)
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 
-			ringText, ok := spellRingsGet(mctx, int64(ring), -1)
-			if !ok {
-				dd.Dict.Store("pp", ds.NewIntVal(pp))
-				ReplyToSender(mctx, msg, fmt.Sprintf("环位不足: %s", ringText))
-				return CmdExecuteResult{Matched: true, Solved: true}
-			}
+			// ========== 输出格式 ==========
+			var calcText strings.Builder
+			fmt.Fprintf(&calcText, "( %s -> %s | %s | ", attacker, defender, name)
 
-			atkLabel := "物攻"
-			defLabel := "物防"
-			if isSpecial {
-				atkLabel = "特攻"
-				defLabel = "特防"
-			}
-
-			atkVal := int64(10)
-			if isSpecial {
-				atkVal, _ = VarGetValueInt64(mctx, "satk")
+			// d20 结果
+			if advantage != "" {
+				fmt.Fprintf(&calcText, "d20%s=%d", advantage, result.D20)
 			} else {
-				atkVal, _ = VarGetValueInt64(mctx, "patk")
+				fmt.Fprintf(&calcText, "d20=%d", result.D20)
 			}
-			if atkVal == 0 {
-				atkVal = 10
-			}
-			defVal := int64(10)
-			defCtx := ctx
-			if defender != "" && defender != attacker {
-				defCtx = ctx
-			}
-			if isSpecial {
-				defVal, _ = VarGetValueInt64(defCtx, "sdef")
-			} else {
-				defVal, _ = VarGetValueInt64(defCtx, "pdef")
-			}
-			if defVal == 0 {
-				defVal = 10
-			}
-			battleLv := int64(1)
-			if v, _ := VarGetValueInt64(mctx, "战斗等级"); v != 0 {
-				battleLv = v
+			if result.CritText != "" {
+				fmt.Fprintf(&calcText, " %s", result.CritText)
 			}
 
-			text := fmt.Sprintf("%s使用了%s！PP: %d/%d (%s)\n",
-				getPlayerNameTempFunc(mctx), name, pp-1, ppmax, ringText)
-			text += fmt.Sprintf("%s的%s(威力%d %s系 %s) d20 %d%s\n",
-				attacker, name, power, elemType, atkLabel, result.D20, result.CritText)
-			text += fmt.Sprintf("基础伤害 = %d * %d(战斗等级) * %d(%s) * %d%% / (100 * %d(%s)) = %d",
-				power, battleLv, atkVal, atkLabel, result.RollPct, defVal, defLabel, result.BaseDmg)
-			if result.TypeMod != 0 || result.StabMul != 1.0 {
-				text += fmt.Sprintf("\n修正: STAB x%.2f, 克制 x%.2f => 最终伤害 %d",
-					result.StabMul, (2.0+result.TypeMod)/2.0, result.FinalDmg)
-			}
-			if elemType != "一般" && defender != "" {
-				if mod, ok := pmdndTypeChart[elemType][elemType]; ok && mod != 0 {
-					text += fmt.Sprintf("\n提示: %s系对%s系 %s", elemType, elemType, getTypeEffectivenessText(mod))
+			// 基础伤害计算（即使大失败也显示，方便核对）
+			fmt.Fprintf(&calcText, " | 基础: %d*%d*%d*%d%%/(100*%d)=%d",
+				power, result.BattleLv, result.AtkVal, result.RollPct, result.DefVal, result.BaseDmg)
+
+			if result.StabMul != 1.0 || result.TypeMod != 0 {
+				factor := (2.0 + result.TypeMod) / 2.0
+				if factor < 0.25 {
+					factor = 0.25
+				}
+				fmt.Fprintf(&calcText, " | STAB x%.2f, 克制 x%.2f", result.StabMul, factor)
+				if result.FinalDmg != result.BaseDmg {
+					fmt.Fprintf(&calcText, " => %d", result.FinalDmg)
 				}
 			}
-			ReplyToSender(mctx, msg, text)
+
+			// 资源消耗信息
+			fmt.Fprintf(&calcText, " | PP %d/%d", pp-1, ppmax)
+			if ringText != "" {
+				fmt.Fprintf(&calcText, " | %s", ringText)
+			}
+			fmt.Fprintf(&calcText, " )")
+
+			// ----- 战斗演说 -----
+			var flavorText strings.Builder
+			fmt.Fprintf(&flavorText, "%s 对 %s 使用了 %s！\n",
+				getPlayerNameTempFunc(mctx), defender, name)
+
+			if !result.Hit {
+				fmt.Fprintf(&flavorText, "但是攻击没有命中……")
+			} else {
+				if result.Crit {
+					fmt.Fprintf(&flavorText, "命中要害！\n")
+				}
+				if result.EffectText != "" {
+					fmt.Fprintf(&flavorText, "%s\n", result.EffectText)
+				}
+				if result.FinalDmg == 0 {
+					fmt.Fprintf(&flavorText, "对 %s 没有造成伤害……", defender)
+				} else {
+					fmt.Fprintf(&flavorText, "%s 受到了 %d 点伤害！", defender, result.FinalDmg)
+				}
+			}
+
+			// 合并输出
+			fullText := calcText.String() + "\n" + flavorText.String()
+			ReplyToSender(mctx, msg, fullText)
 
 		case "pp":
 			name := cmdArgs.GetArgN(2)
