@@ -16,7 +16,7 @@ type DamageResult struct {
 	Defender   string  // 防御者名称
 	Power      int64   // 招式威力
 	AtkType    string  // 攻击属性
-	AtkVal     int64   // 攻击值
+	AtkVal     int64   // 攻击值（已应用能力等级修正）
 	DefVal     int64   // 防御值
 	BattleLv   int64   // 战斗等级
 }
@@ -45,25 +45,25 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	defCtx := ctx
 
 	// ----- 1. 获取攻击者攻击值 -----
-	atkVal := int64(10)
+	rawAtkVal := int64(10)
 	if !isSpecial {
 		// 物理攻击：读取 patk
-		atkVal = getNPCAttr(ctx, attacker, "patk")
-		if atkVal == 0 {
+		rawAtkVal = getNPCAttr(ctx, attacker, "patk")
+		if rawAtkVal == 0 {
 			if v, _ := VarGetValueInt64(attackerCtx, "patk"); v != 0 {
-				atkVal = v
+				rawAtkVal = v
 			} else {
-				atkVal = 10
+				rawAtkVal = 10
 			}
 		}
 	} else {
 		// 特殊攻击：读取 satk
-		atkVal = getNPCAttr(ctx, attacker, "satk")
-		if atkVal == 0 {
+		rawAtkVal = getNPCAttr(ctx, attacker, "satk")
+		if rawAtkVal == 0 {
 			if v, _ := VarGetValueInt64(attackerCtx, "satk"); v != 0 {
-				atkVal = v
+				rawAtkVal = v
 			} else {
-				atkVal = 10
+				rawAtkVal = 10
 			}
 		}
 	}
@@ -102,7 +102,25 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		battleLv = v
 	}
 
-	// ----- 4. 掷骰 (d20) -----
+	// ----- 4. 加载战斗状态（能力等级、护盾等） -----
+	state := loadBattleState(ctx)
+
+	// ----- 5. 应用能力变化等级修正到攻击值 -----
+	levelModifier := 1.0
+	if isSpecial {
+		// 特殊攻击受特攻等级影响
+		levelModifier = getAbilityModifier(state.SpAttackLevel)
+	} else {
+		// 物理攻击受物攻等级影响
+		levelModifier = getAbilityModifier(state.AttackLevel)
+	}
+	atkVal := int64(float64(rawAtkVal) * levelModifier)
+	if atkVal < 1 {
+		atkVal = 1
+	}
+	result.AtkVal = atkVal
+
+	// ----- 6. 掷骰 (d20) -----
 	d20Expr := "d20"
 	if advantage != "" {
 		d20Expr = "d20" + advantage
@@ -115,7 +133,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	d20, _ := r.ReadInt()
 	result.D20 = int64(d20)
 
-	// ----- 5. 计算攻击掷骰百分比 -----
+	// ----- 7. 计算攻击掷骰百分比 -----
 	rollPct := int64(d20) * 5
 	if int64(d20) >= ctLimit {
 		rollPct += 50
@@ -127,7 +145,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 	result.RollPct = rollPct
 
-	// ----- 6. 计算基础伤害 -----
+	// ----- 8. 计算基础伤害 -----
 	totalDmg := (power * battleLv * atkVal * rollPct) / (100 * defVal)
 	if totalDmg < 1 {
 		totalDmg = 1
@@ -137,7 +155,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 	result.BaseDmg = totalDmg
 
-	// ----- 7. STAB 计算（本系加成） -----
+	// ----- 9. STAB 计算（本系加成） -----
 	atkTypes := []string{}
 	for _, t := range pmdndTypeNames {
 		key := "type_" + t
@@ -166,7 +184,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 	result.StabMul = stabMul
 
-	// ----- 8. 属性克制计算（支持多属性叠加） -----
+	// ----- 10. 属性克制计算（支持多属性叠加） -----
 	typeMod := 0.0
 	if defender != "" && defender != "目标" {
 		for _, t := range pmdndTypeNames {
@@ -190,7 +208,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 	result.TypeMod = typeMod
 
-	// ----- 9. 计算最终伤害（应用 STAB 和克制修正） -----
+	// ----- 11. 计算初步最终伤害（应用 STAB 和克制修正） -----
 	finalDmg := totalDmg
 	if typeMod != 0 || stabMul != 1.0 {
 		factor := (2.0 + typeMod) / 2.0
@@ -200,14 +218,22 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		factor *= stabMul
 		finalDmg = int64(float64(totalDmg) * factor)
 	}
+
+	// ----- 12. 应用结界减伤（反射壁/光墙） -----
+	if !isSpecial && state.ReflectWall > 0 {
+		// 反射壁：物理伤害减半
+		finalDmg = finalDmg / 2
+	} else if isSpecial && state.LightScreen > 0 {
+		// 光墙：特殊伤害减半
+		finalDmg = finalDmg / 2
+	}
 	result.FinalDmg = finalDmg
 
-	// ----- 10. 填充结果字段 -----
+	// ----- 13. 填充结果字段 -----
 	result.Attacker = attacker
 	result.Defender = defender
 	result.Power = power
 	result.AtkType = atkType
-	result.AtkVal = atkVal
 	result.DefVal = defVal
 	result.BattleLv = battleLv
 	result.Hit = rollPct > 0
@@ -221,6 +247,10 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 			factor = 0.25
 		}
 		totalFactor = factor * stabMul
+	}
+	// 结界减半也影响效果判定
+	if (!isSpecial && state.ReflectWall > 0) || (isSpecial && state.LightScreen > 0) {
+		totalFactor = totalFactor / 2
 	}
 
 	// 判定效果文本
