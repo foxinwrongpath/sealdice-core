@@ -29,11 +29,6 @@ var cmdRest = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
 		}
 
-		recoveryRate := int64(1)
-		if isShort {
-			recoveryRate = 2
-		}
-
 		playerName := getPlayerNameTempFunc(mctx)
 		var hpText string
 		var ppText string
@@ -41,13 +36,16 @@ var cmdRest = &CmdItemInfo{
 		// ---- HP 恢复 ----
 		hpMax, hpExists := VarGetValueInt64(mctx, "hpmax")
 		if hpExists {
-			curHp, _ := VarGetValueInt64(mctx, "hp")
-			newHp := hpMax / recoveryRate
-			if isShort && curHp > newHp && curHp <= hpMax {
-				newHp = curHp
-			}
-			if !isShort {
+			var newHp int64
+			if isShort {
+				// 短休：固定恢复一半
+				newHp = hpMax / 2
+			} else {
+				// 长休：恢复全部
 				newHp = hpMax
+			}
+			if newHp < 1 {
+				newHp = 1
 			}
 			VarSetValueInt64(mctx, "hp", newHp)
 			hpText = fmt.Sprintf("❤️ HP: %d/%d", newHp, hpMax)
@@ -58,13 +56,16 @@ var cmdRest = &CmdItemInfo{
 		// ---- PP 恢复（法力值系统） ----
 		ppMax, ppExists := VarGetValueInt64(mctx, "ppmax")
 		if ppExists {
-			curPp, _ := VarGetValueInt64(mctx, "pp")
-			newPp := ppMax / recoveryRate
-			if isShort && curPp > newPp && curPp <= ppMax {
-				newPp = curPp
-			}
-			if !isShort {
+			var newPp int64
+			if isShort {
+				// 短休：固定恢复一半
+				newPp = ppMax / 2
+			} else {
+				// 长休：恢复全部
 				newPp = ppMax
+			}
+			if newPp < 1 {
+				newPp = 1
 			}
 			VarSetValueInt64(mctx, "pp", newPp)
 			ppText = fmt.Sprintf("💎 PP: %d/%d", newPp, ppMax)

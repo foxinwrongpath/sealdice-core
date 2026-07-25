@@ -590,7 +590,14 @@ var cmdNPC = &CmdItemInfo{
 	Help:          getNpcHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
-		arg1 := cmdArgs.GetArgN(1)
+		// cmdArgs.CleanArgs 不包含命令名，直接分割参数
+		parts := strings.Fields(cmdArgs.CleanArgs)
+		if len(parts) == 0 {
+			ReplyToSender(ctx, msg, getNpcHelp())
+			return CmdExecuteResult{Matched: true, Solved: true}
+		}
+
+		arg1 := parts[0]
 
 		// ============================================
 		// 顶层命令: new, list, del, clear, help
@@ -601,11 +608,11 @@ var cmdNPC = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true}
 
 		case "new":
-			name := cmdArgs.GetArgN(2)
-			if name == "" {
+			if len(parts) < 2 {
 				ReplyToSender(ctx, msg, "用法: .npc new <名称>")
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
+			name := parts[1]
 			ensureNPC(ctx, name)
 			ReplyToSender(ctx, msg, fmt.Sprintf("已创建NPC: %s", name))
 			return CmdExecuteResult{Matched: true, Solved: true}
@@ -624,11 +631,11 @@ var cmdNPC = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true}
 
 		case "del":
-			name := cmdArgs.GetArgN(2)
-			if name == "" {
+			if len(parts) < 2 {
 				ReplyToSender(ctx, msg, "用法: .npc del <名称>")
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
+			name := parts[1]
 			data := loadNPCData(ctx)
 			if _, ok := data[name]; !ok {
 				ReplyToSender(ctx, msg, fmt.Sprintf("未找到NPC: %s", name))
@@ -664,11 +671,12 @@ var cmdNPC = &CmdItemInfo{
 		// ============================================
 		// 有名称的操作: .npc <名称> <子命令> ...
 		// ============================================
-		npcName := arg1
-		if npcName == "" {
-			ReplyToSender(ctx, msg, getNpcHelp())
+		if len(parts) < 2 {
+			ReplyToSender(ctx, msg, fmt.Sprintf("缺少子命令，可用: st, show, move"))
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
+		npcName := parts[0]
+		sub := parts[1]
 
 		// 检查 NPC 是否存在
 		data := loadNPCData(ctx)
@@ -677,18 +685,16 @@ var cmdNPC = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		sub := cmdArgs.GetArgN(2)
-
 		// ============================================
 		// .npc <名称> st <属性1>:<值1> ...
 		// ============================================
 		if sub == "st" || sub == "属性" {
-			props := data[npcName]
-			args := cmdArgs.Args[3:] // 跳过 "npcName" 和 "st"
-			if len(args) == 0 {
+			if len(parts) < 3 {
 				ReplyToSender(ctx, msg, "请指定属性: .npc <名称> st <属性1>:<值1> ...")
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
+			props := data[npcName]
+			args := parts[2:] // 属性对列表
 
 			var setItems []string
 			for _, arg := range args {
@@ -726,7 +732,7 @@ var cmdNPC = &CmdItemInfo{
 		// ============================================
 		// .npc <名称> show
 		// ============================================
-		if sub == "show" || sub == "" {
+		if sub == "show" {
 			props := data[npcName]
 			var lines []string
 			lines = append(lines, fmt.Sprintf("NPC %s 属性:", npcName))
@@ -767,22 +773,31 @@ var cmdNPC = &CmdItemInfo{
 		// .npc <名称> move ...
 		// ============================================
 		if sub == "move" {
-			moveSub := cmdArgs.GetArgN(3)
+			if len(parts) < 3 {
+				ReplyToSender(ctx, msg, "缺少 move 子命令: add/list/del/clear/招式名")
+				return CmdExecuteResult{Matched: true, Solved: true}
+			}
+			moveSub := parts[2]
 
 			switch moveSub {
 			case "add":
-				moveName := cmdArgs.GetArgN(4)
-				powerStr := cmdArgs.GetArgN(5)
-				elemType := cmdArgs.GetArgN(6)
-				ringStr := cmdArgs.GetArgN(7)
-				category := cmdArgs.GetArgN(8)
-
-				if moveName == "" || powerStr == "" || elemType == "" || ringStr == "" {
+				if len(parts) < 8 { // 需要：名称 move add 招式名 威力 类型 环位 类别 (7个)
 					ReplyToSender(ctx, msg, "用法: .npc <名称> move add <招式名> <威力> <类型> <环位> <类别> [hits:2-5]")
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
-				power, _ := strconv.ParseInt(powerStr, 10, 64)
-				ring, _ := strconv.ParseInt(ringStr, 10, 64)
+				moveName := parts[3]
+				power, err := strconv.ParseInt(parts[4], 10, 64)
+				if err != nil {
+					ReplyToSender(ctx, msg, "威力必须是数字")
+					return CmdExecuteResult{Matched: true, Solved: true}
+				}
+				elemType := parts[5]
+				ring, err := strconv.ParseInt(parts[6], 10, 64)
+				if err != nil {
+					ReplyToSender(ctx, msg, "环位必须是数字")
+					return CmdExecuteResult{Matched: true, Solved: true}
+				}
+				category := parts[7]
 				if category == "" {
 					category = "物"
 				}
@@ -797,11 +812,11 @@ var cmdNPC = &CmdItemInfo{
 					category = "强化"
 				}
 
-				// 解析 hits（遍历所有参数）
+				// 解析 hits（从剩余参数中查找）
 				hitsStr := "1"
-				for _, arg := range cmdArgs.Args {
-					if strings.HasPrefix(arg, "hits:") {
-						hitsStr = strings.TrimPrefix(arg, "hits:")
+				for i := 8; i < len(parts); i++ {
+					if strings.HasPrefix(parts[i], "hits:") {
+						hitsStr = strings.TrimPrefix(parts[i], "hits:")
 						break
 					}
 				}
@@ -848,11 +863,11 @@ var cmdNPC = &CmdItemInfo{
 				ReplyToSender(ctx, msg, fmt.Sprintf("NPC %s 的招式:\n%s", npcName, strings.Join(items, "\n")))
 
 			case "del":
-				moveName := cmdArgs.GetArgN(4)
-				if moveName == "" {
+				if len(parts) < 4 {
 					ReplyToSender(ctx, msg, "用法: .npc <名称> move del <招式名>")
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
+				moveName := parts[3]
 				moves := loadNPCMoves(ctx, npcName)
 				if _, ok := moves[moveName]; !ok {
 					ReplyToSender(ctx, msg, fmt.Sprintf("NPC %s 没有招式 %s", npcName, moveName))
@@ -877,7 +892,6 @@ var cmdNPC = &CmdItemInfo{
 			default:
 				// ============================================
 				// .npc <名称> move <招式名> [@目标] [优势/劣势] ...
-				// NPC 使用招式攻击
 				// ============================================
 				moveName := moveSub
 				if moveName == "" {
@@ -892,8 +906,8 @@ var cmdNPC = &CmdItemInfo{
 				detailMode := false
 				debugMode := false
 
-				for i := 4; i < len(cmdArgs.Args); i++ {
-					p := cmdArgs.Args[i]
+				for i := 3; i < len(parts); i++ {
+					p := parts[i]
 					if strings.HasPrefix(p, "@") {
 						target = strings.TrimPrefix(p, "@")
 					} else if p == "优势" || p == "優勢" {
