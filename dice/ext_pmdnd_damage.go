@@ -236,3 +236,111 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 
 	return result, ""
 }
+
+// HealResult 治疗计算结果
+type HealResult struct {
+	BaseHeal   int64   // 基础治疗量
+	FinalHeal  int64   // 最终治疗量
+	D20        int64   // d20 出目
+	CritText   string  // 暴击文本
+	RollPct    int64   // 治疗掷骰百分比
+	StabMul    float64 // STAB 倍率
+	Crit       bool    // 是否暴击
+	HealAtkVal int64   // 治疗攻击值（特防）
+}
+
+// calculateHeal 计算治疗量
+// 规则: 治疗使用特防作为攻击能力值，防御方能力值固定为200
+func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage string, ctLimit int64, attacker string, defender string) (HealResult, string) {
+	var result HealResult
+
+	attackerCtx := ctx
+
+	// ----- 1. 获取治疗攻击值（特防） -----
+	healAtkVal := getNPCAttr(ctx, attacker, "sdef")
+	if healAtkVal == 0 {
+		if v, _ := VarGetValueInt64(attackerCtx, "sdef"); v != 0 {
+			healAtkVal = v
+		} else {
+			healAtkVal = 10 // 默认值
+		}
+	}
+	result.HealAtkVal = healAtkVal
+
+	// ----- 2. 治疗公式：挑战等级固定为 100，防御固定为 200 -----
+	battleLv := int64(100)
+	defVal := int64(200)
+
+	// ----- 3. 掷骰 (d20) -----
+	d20Expr := "d20"
+	if advantage != "" {
+		d20Expr = "d20" + advantage
+	}
+	attackerCtx.CreateVmIfNotExists()
+	r := attackerCtx.Eval(d20Expr, nil)
+	if r.vm.Error != nil {
+		return result, "骰点失败: " + r.vm.Error.Error()
+	}
+	d20, _ := r.ReadInt()
+	result.D20 = int64(d20)
+
+	rollPct := int64(d20) * 5
+	if int64(d20) >= ctLimit {
+		rollPct += 50
+		result.CritText = "【暴击+50%】"
+	}
+	if int64(d20) == 1 {
+		rollPct = 0
+		result.CritText = "【大失败】"
+	}
+	result.RollPct = rollPct
+	result.Crit = int64(d20) >= ctLimit
+
+	// ----- 4. 基础治疗量 -----
+	baseHeal := (power * battleLv * healAtkVal * rollPct) / (100 * defVal)
+	if baseHeal < 1 {
+		baseHeal = 1
+	}
+	if rollPct == 0 {
+		baseHeal = 0
+	}
+	result.BaseHeal = baseHeal
+
+	// ----- 5. STAB 计算 -----
+	atkTypes := []string{}
+	for _, t := range pmdndTypeNames {
+		key := "type_" + t
+		if v := getNPCAttr(ctx, attacker, key); v > 0 {
+			atkTypes = append(atkTypes, t)
+			continue
+		}
+		if v, _ := VarGetValueInt64(attackerCtx, key); v > 0 {
+			atkTypes = append(atkTypes, t)
+		}
+	}
+
+	stabMul := 1.0
+	for _, t := range atkTypes {
+		if t == atkType {
+			key := "stab_" + t
+			if v := getNPCAttr(ctx, attacker, key); v > 0 {
+				stabMul = (100.0 + float64(v)) / 100.0
+			} else if v, _ := VarGetValueInt64(attackerCtx, key); v > 0 {
+				stabMul = (100.0 + float64(v)) / 100.0
+			} else {
+				stabMul = 1.5
+			}
+			break
+		}
+	}
+	result.StabMul = stabMul
+
+	// ----- 6. 最终治疗量 -----
+	finalHeal := baseHeal
+	if stabMul != 1.0 {
+		finalHeal = int64(float64(baseHeal) * stabMul)
+	}
+	result.FinalHeal = finalHeal
+
+	return result, ""
+}
