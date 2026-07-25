@@ -45,17 +45,17 @@ func pmdndDeathSaving(ctx *MsgContext, successPlus int64, failurePlus int64) (in
 	return val1, val2
 }
 
+// 检查是否达到3成功或3失败，并清除状态
 func pmdndDeathSavingResultCheck(ctx *MsgContext, a int64, b int64) string {
-	text := ""
 	if a >= 3 {
-		text = DiceFormatTmpl(ctx, "DND:死亡豁免_结局_伤势稳定")
 		pmdndDeathSavingStable(ctx)
+		return "✨ 伤势稳定，脱离危险！"
 	}
 	if b >= 3 {
-		text = DiceFormatTmpl(ctx, "DND:死亡豁免_结局_角色死亡")
 		pmdndDeathSavingStable(ctx)
+		return "💀 宝可梦失去了战斗能力……"
 	}
-	return text
+	return ""
 }
 
 // ---------- 帮助文本 ----------
@@ -115,13 +115,17 @@ var cmdDs = &CmdItemInfo{
 			}
 
 			var a, b int64
+			label := ""
 			switch m[1] {
 			case "s", "S", "成功":
 				a, b = pmdndDeathSaving(mctx, v, 0)
+				label = "成功"
 			case "f", "F", "失败":
 				a, b = pmdndDeathSaving(mctx, 0, v)
+				label = "失败"
 			}
-			text := fmt.Sprintf("%s当前濒死豁免状态: 成功%d 失败%d", getPlayerNameTempFunc(mctx), a, b)
+			text := fmt.Sprintf("📊 %s 的濒死豁免状态已更新：\n  %s: %d  失败: %d",
+				getPlayerNameTempFunc(mctx), label, a, b)
 			exText := pmdndDeathSavingResultCheck(mctx, a, b)
 			if exText != "" {
 				text += "\n" + exText
@@ -134,7 +138,12 @@ var cmdDs = &CmdItemInfo{
 		switch val {
 		case "stat":
 			a, b := pmdndDeathSaving(mctx, 0, 0)
-			text := fmt.Sprintf("%s当前濒死豁免状态: 成功%d 失败%d", getPlayerNameTempFunc(mctx), a, b)
+			text := fmt.Sprintf("📊 %s 的濒死豁免状态：\n  成功: %d  失败: %d",
+				getPlayerNameTempFunc(mctx), a, b)
+			exText := pmdndDeathSavingResultCheck(mctx, a, b)
+			if exText != "" {
+				text += "\n" + exText
+			}
 			ReplyToSender(mctx, msg, text)
 
 		case "":
@@ -143,11 +152,11 @@ var cmdDs = &CmdItemInfo{
 			// 检查是否设置了 HP
 			hp, exists := VarGetValueInt64(mctx, "hp")
 			if !exists {
-				ReplyToSender(mctx, msg, fmt.Sprintf("%s未设置生命值，无法进行濒死豁免检定。", getPlayerNameTempFunc(mctx)))
+				ReplyToSender(mctx, msg, fmt.Sprintf("❌ %s 未设置生命值，无法进行濒死豁免检定。", getPlayerNameTempFunc(mctx)))
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 			if hp > 0 {
-				ReplyToSender(mctx, msg, fmt.Sprintf("%s生命值大于0(当前为%d)，无需进行濒死豁免。", getPlayerNameTempFunc(mctx), hp))
+				ReplyToSender(mctx, msg, fmt.Sprintf("💚 %s 生命值大于0 (当前 %d)，无需进行濒死豁免。", getPlayerNameTempFunc(mctx), hp))
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 
@@ -181,56 +190,53 @@ var cmdDs = &CmdItemInfo{
 				exprToShow, _ = strings.CutPrefix(detail, s)
 			}
 
+			playerName := getPlayerNameTempFunc(mctx)
+			var text string
+
 			// D20=20: 恢复1HP
 			if d20 == 20 {
 				pmdndDeathSavingStable(mctx)
 				VarSetValueInt64(mctx, "hp", 1)
-				suffix := DiceFormatTmpl(mctx, "DND:死亡豁免_D20_附加语")
-				ReplyToSender(mctx, msg, fmt.Sprintf("%s的濒死豁免: %s=%d %s",
-					getPlayerNameTempFunc(mctx), exprToShow, d20, suffix))
+				text = fmt.Sprintf("💔 %s 失去战斗能力！\n正在进行 濒死判定...\n%s = 20 ✨ 大成功！\n奇迹发生！恢复 1 HP！\n%s 重新站了起来！",
+					playerName, exprToShow, playerName)
+				ReplyToSender(mctx, msg, text)
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 
 			// D20=1: 计为2次失败
 			if d20 == 1 {
-				suffix := DiceFormatTmpl(mctx, "DND:死亡豁免_D1_附加语")
-				text := fmt.Sprintf("%s的濒死豁免: %s=%d %s",
-					getPlayerNameTempFunc(mctx), exprToShow, d20, suffix)
 				a, b := pmdndDeathSaving(mctx, 0, 2)
+				text = fmt.Sprintf("💔 %s 失去战斗能力！\n正在进行 濒死判定...\n%s = 1 💀 大失败！\n（计为2次失败）\n当前状态: 成功 %d  失败 %d",
+					playerName, exprToShow, a, b)
 				exText := pmdndDeathSavingResultCheck(mctx, a, b)
 				if exText != "" {
 					text += "\n" + exText
 				}
-				text += fmt.Sprintf("\n当前状态: 成功%d 失败%d", a, b)
 				ReplyToSender(mctx, msg, text)
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 
 			// D20 >= 10: 成功
 			if d20 >= 10 {
-				suffix := DiceFormatTmpl(mctx, "DND:死亡豁免_成功_附加语")
-				text := fmt.Sprintf("%s的濒死豁免: %s=%d %s",
-					getPlayerNameTempFunc(mctx), exprToShow, d20, suffix)
 				a, b := pmdndDeathSaving(mctx, 1, 0)
+				text = fmt.Sprintf("💔 %s 失去战斗能力！\n正在进行 濒死判定...\n%s = %d 🌟 成功！\n当前状态: 成功 %d  失败 %d",
+					playerName, exprToShow, d20, a, b)
 				exText := pmdndDeathSavingResultCheck(mctx, a, b)
 				if exText != "" {
 					text += "\n" + exText
 				}
-				text += fmt.Sprintf("\n当前状态: 成功%d 失败%d", a, b)
 				ReplyToSender(mctx, msg, text)
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 
 			// D20 < 10: 失败
-			suffix := DiceFormatTmpl(mctx, "DND:死亡豁免_失败_附加语")
-			text := fmt.Sprintf("%s的濒死豁免: %s=%d %s",
-				getPlayerNameTempFunc(mctx), exprToShow, d20, suffix)
 			a, b := pmdndDeathSaving(mctx, 0, 1)
+			text = fmt.Sprintf("💔 %s 失去战斗能力！\n正在进行 濒死判定...\n%s = %d 💨 失败……\n当前状态: 成功 %d  失败 %d",
+				playerName, exprToShow, d20, a, b)
 			exText := pmdndDeathSavingResultCheck(mctx, a, b)
 			if exText != "" {
 				text += "\n" + exText
 			}
-			text += fmt.Sprintf("\n当前状态: 成功%d 失败%d", a, b)
 			ReplyToSender(mctx, msg, text)
 		}
 		return CmdExecuteResult{Matched: true, Solved: true}

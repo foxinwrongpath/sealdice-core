@@ -39,7 +39,6 @@ var cmdRc = &CmdItemInfo{
 		clean := cmdArgs.CleanArgs
 		if strings.Contains(clean, "--hide") {
 			hide = true
-			// 移除 --hide
 			clean = strings.Replace(clean, "--hide", "", 1)
 			cmdArgs.CleanArgs = clean
 		}
@@ -128,6 +127,14 @@ var cmdRc = &CmdItemInfo{
 				text = DiceFormatTmpl(mctx, "DND:检定_多轮")
 			} else {
 				text = textList[0]
+			}
+
+			// --- 宝可梦化：添加风格前缀 ---
+			playerName := getPlayerNameTempFunc(mctx)
+			if round > 1 {
+				text = "🎯 " + playerName + " 的多次检定结果：\n" + text
+			} else {
+				text = "🎯 " + playerName + " 的检定！\n" + text
 			}
 
 			if hide {

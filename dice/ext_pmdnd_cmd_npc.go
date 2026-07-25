@@ -62,7 +62,6 @@ func saveNPCData(ctx *MsgContext, data NPCData) {
 			}
 			(*ds.VMValue)(subDict).MustReadDictData().Dict.Store(k, val)
 		}
-		// 关键修复：dict 也是 *VMDictValue，需要转换为 *VMValue 再调用
 		(*ds.VMValue)(dict).MustReadDictData().Dict.Store(name, (*ds.VMValue)(subDict))
 	}
 	attrs.Store("$g_npc_data", (*ds.VMValue)(dict))
@@ -109,66 +108,153 @@ func getNPCStringAttr(ctx *MsgContext, name string, attr string) string {
 	return ""
 }
 
+// updateNPCHP 更新 NPC 的 HP（扣除伤害），返回新 HP、最大值和是否成功
+func updateNPCHP(ctx *MsgContext, name string, damage int64) (newHp int64, maxHp int64, ok bool) {
+	data := loadNPCData(ctx)
+	props, exists := data[name]
+	if !exists {
+		return 0, 0, false
+	}
+
+	var curHp int64
+	if v, ok := props["hp"]; ok {
+		switch val := v.(type) {
+		case int:
+			curHp = int64(val)
+		case float64:
+			curHp = int64(val)
+		default:
+			return 0, 0, false
+		}
+	} else {
+		return 0, 0, false
+	}
+
+	if v, ok := props["hpmax"]; ok {
+		switch val := v.(type) {
+		case int:
+			maxHp = int64(val)
+		case float64:
+			maxHp = int64(val)
+		default:
+			maxHp = curHp
+		}
+	} else {
+		maxHp = curHp
+	}
+
+	newHp = curHp - damage
+	if newHp < 0 {
+		newHp = 0
+	}
+	props["hp"] = int(newHp)
+	saveNPCData(ctx, data)
+	return newHp, maxHp, true
+}
+
+// getNPCHP 获取 NPC 的 HP 信息
+func getNPCHP(ctx *MsgContext, name string) (curHp int64, maxHp int64, ok bool) {
+	data := loadNPCData(ctx)
+	props, exists := data[name]
+	if !exists {
+		return 0, 0, false
+	}
+	if v, ok := props["hp"]; ok {
+		switch val := v.(type) {
+		case int:
+			curHp = int64(val)
+		case float64:
+			curHp = int64(val)
+		}
+	} else {
+		return 0, 0, false
+	}
+	if v, ok := props["hpmax"]; ok {
+		switch val := v.(type) {
+		case int:
+			maxHp = int64(val)
+		case float64:
+			maxHp = int64(val)
+		}
+	} else {
+		maxHp = curHp
+	}
+	return curHp, maxHp, true
+}
+
 // cmdNPC .npc 命令
 var cmdNPC = &CmdItemInfo{
 	Name:      "npc",
 	ShortHelp: ".npc set <名称> <属性1>:<值1> [<属性2>:<值2> ...]\n.npc show <名称>\n.npc list\n.npc del <名称>\n.npc clear",
 	Help: "PMDnD NPC 管理:\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"📌 作用: 为战斗中的NPC设置临时属性，让 @NPC 能正确读取数值。\n" +
+		"📌 为战斗中的宝可梦（敌人/盟友）设置数据，让 @名称 可被识别。\n" +
 		"\n" +
-		"📖 语法:\n" +
-		"  .npc set <名称> <属性1>:<值1> [<属性2>:<值2> ...]\n" +
-		"  .npc show <名称>\n" +
-		"  .npc list\n" +
-		"  .npc del <名称>\n" +
-		"  .npc clear\n" +
+		"📖 子命令:\n" +
+		"  set <名称> <属性1>:<值1> ...   设置或更新角色数据\n" +
+		"  show <名称>                    查看角色数据\n" +
+		"  list                           列出所有已设置的角色\n" +
+		"  del <名称>                     删除指定角色\n" +
+		"  clear                          清除所有角色数据\n" +
 		"\n" +
-		"📝 示例:\n" +
-		"  .npc set 圈圈熊 patk:30 pdef:20 type_格斗:1\n" +
-		"  .npc set 大嘴蝠 patk:15 pdef:10 satk:25 sdef:12 type_飞行:1 type_毒:1\n" +
+		"📝 可用属性:\n" +
+		"  物攻 patk:数字   物防 pdef:数字   速度 spd:数字\n" +
+		"  特攻 satk:数字   特防 sdef:数字\n" +
+		"  生命 hp:数字     生命上限 hpmax:数字\n" +
+		"  战斗等级 cr:数字   (默认30，影响伤害计算)\n" +
+		"  属性类型 type_火:1  type_水:1  type_格斗:1  ……\n" +
+		"\n" +
+		"📝 常用示例:\n" +
+		"  .npc set 圈圈熊 patk:30 pdef:20 hpmax:100 cr:30 type_格斗:1\n" +
+		"  .npc set 大嘴蝠 patk:15 pdef:10 satk:25 sdef:12 hpmax:80\n" +
 		"  .npc list\n" +
 		"  .npc show 圈圈熊\n" +
 		"\n" +
-		"⚔️ 战斗中使用:\n" +
-		"  .dmg 80 格斗 物 @圈圈熊 @伊布    # 自动读取圈圈熊的 patk\n" +
-		"  .move attack 撞击 @大嘴蝠         # 自动读取大嘴蝠的 pdef\n" +
+		"⚔️ 战斗中使用 (配合 .dmg):\n" +
+		"  .dmg 格斗 80 物 @圈圈熊          # 攻击圈圈熊，读取其 pdef\n" +
+		"  .dmg 格斗 80 物 @圈圈熊 @伊布    # 圈圈熊攻击伊布，读取其 patk 和 cr\n" +
+		"  .move attack 撞击 @大嘴蝠        # 攻击大嘴蝠，读取其 pdef\n" +
+		"\n" +
+		"💡 设置 hpmax 后，攻击会自动扣血并显示血条:\n" +
+		"  📊 HP: ████████░░ 80/100\n" +
 		"\n" +
 		"🗑️ 删除:\n" +
 		"  .npc del 圈圈熊\n" +
-		"  .npc clear                         # 清除所有NPC\n" +
-		"\n" +
-		"📋 支持属性: patk, pdef, satk, sdef, spd, type_*, stab_*\n" +
+		"  .npc clear                         # 清除所有\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		sub := cmdArgs.GetArgN(1)
 		switch sub {
 		case "set":
-			name := cmdArgs.GetArgN(2)
-			if name == "" {
-				ReplyToSender(ctx, msg, "请指定NPC名称: .npc set <名称> <属性1>:<值1> ...")
+			parts := strings.Fields(cmdArgs.CleanArgs)
+			if len(parts) < 3 {
+				ReplyToSender(ctx, msg, "格式错误: .npc set <名称> <属性1>:<值1> ...")
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
+			name := parts[1]
+			attrParts := parts[2:]
+
+			if len(attrParts) == 0 {
+				ReplyToSender(ctx, msg, "请指定至少一个属性: .npc set <名称> <属性1>:<值1> ...")
+				return CmdExecuteResult{Matched: true, Solved: true}
+			}
+
 			data := loadNPCData(ctx)
 			if _, ok := data[name]; !ok {
 				data[name] = make(map[string]interface{})
 			}
 			props := data[name]
-			args := cmdArgs.Args[3:]
-			if len(args) == 0 {
-				ReplyToSender(ctx, msg, "请指定至少一个属性: .npc set <名称> <属性1>:<值1> ...")
-				return CmdExecuteResult{Matched: true, Solved: true}
-			}
+
 			var setItems []string
-			for _, arg := range args {
-				parts := strings.SplitN(arg, ":", 2)
-				if len(parts) != 2 {
+			for _, arg := range attrParts {
+				kv := strings.SplitN(arg, ":", 2)
+				if len(kv) != 2 {
 					ReplyToSender(ctx, msg, fmt.Sprintf("属性格式错误: %s，应为 属性:值", arg))
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
-				key := strings.TrimSpace(parts[0])
-				valStr := strings.TrimSpace(parts[1])
+				key := strings.TrimSpace(kv[0])
+				valStr := strings.TrimSpace(kv[1])
 				if i, err := strconv.ParseInt(valStr, 10, 64); err == nil {
 					props[key] = int(i)
 				} else if f, err := strconv.ParseFloat(valStr, 64); err == nil {
@@ -178,6 +264,16 @@ var cmdNPC = &CmdItemInfo{
 				}
 				setItems = append(setItems, fmt.Sprintf("%s:%s", key, valStr))
 			}
+
+			// 如果设置了 hpmax 但没有设置 hp，自动将 hp 设为 hpmax
+			if _, hasHp := props["hp"]; !hasHp {
+				if hpmax, ok := props["hpmax"]; ok {
+					if v, ok := hpmax.(int); ok {
+						props["hp"] = v
+					}
+				}
+			}
+
 			saveNPCData(ctx, data)
 			ReplyToSender(ctx, msg, fmt.Sprintf("NPC %s 属性已设置: %s", name, strings.Join(setItems, " ")))
 
@@ -196,6 +292,13 @@ var cmdNPC = &CmdItemInfo{
 			var lines []string
 			lines = append(lines, fmt.Sprintf("NPC %s 属性:", name))
 			for k, v := range props {
+				// 友好显示 hp/hpmax
+				if k == "hp" {
+					if hpmax, ok := props["hpmax"]; ok {
+						lines = append(lines, fmt.Sprintf("  HP: %d/%d", v, hpmax))
+						continue
+					}
+				}
 				lines = append(lines, fmt.Sprintf("  %s: %v", k, v))
 			}
 			ReplyToSender(ctx, msg, strings.Join(lines, "\n"))
@@ -251,6 +354,12 @@ var cmdNPC = &CmdItemInfo{
 				var lines []string
 				lines = append(lines, fmt.Sprintf("NPC %s 属性:", name))
 				for k, v := range props {
+					if k == "hp" {
+						if hpmax, ok := props["hpmax"]; ok {
+							lines = append(lines, fmt.Sprintf("  HP: %d/%d", v, hpmax))
+							continue
+						}
+					}
 					lines = append(lines, fmt.Sprintf("  %s: %v", k, v))
 				}
 				ReplyToSender(ctx, msg, strings.Join(lines, "\n"))

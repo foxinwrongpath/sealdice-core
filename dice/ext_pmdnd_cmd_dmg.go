@@ -12,13 +12,18 @@ func getDmgHelp() string {
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
 		".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n" +
 		"  例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊\n" +
-		"  例: .dmg 格斗 80 物 @圈圈熊 @伊布\n" +
+		"  例: .dmg 格斗 80 物 @圈圈熊           # 自己攻击圈圈熊\n" +
+		"  例: .dmg 格斗 80 物 @圈圈熊 @伊布     # 圈圈熊攻击伊布\n" +
 		"  例: .dmg 水 60 特 优势\n" +
+		"\n" +
+		"📋 @ 参数规则:\n" +
+		"  一个 @ → 防御者（被攻击的目标），攻击者默认为自己\n" +
+		"  两个 @ → 第一个是攻击者，第二个是防御者\n" +
 		"\n" +
 		"👾 NPC使用: 先用 .npc set <名称> <属性>:<值> 设置NPC属性\n" +
 		"   然后 @NPC 即可自动读取攻击/防御数值\n" +
 		"   例: .npc set 圈圈熊 patk:30 pdef:20\n" +
-		"       .dmg 格斗 80 物 @圈圈熊 @伊布\n" +
+		"       .dmg 格斗 80 物 @圈圈熊\n" +
 		"\n" +
 		"📋 参数说明:\n" +
 		"  类型: 攻击的属性（火/水/草/格斗/一般等）\n" +
@@ -37,7 +42,8 @@ func getDmgHelp() string {
 func getDmgShortHelp() string {
 	return ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n" +
 		"示例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊\n" +
-		"👾 NPC使用: .npc set 圈圈熊 patk:30 pdef:20 后自动读取"
+		"一个 @ → 防御者，攻击者是自己\n" +
+		"两个 @ → 第一个攻击者，第二个防御者"
 }
 
 // ---------- .dmg 命令 ----------
@@ -79,8 +85,37 @@ var cmdDmg = &CmdItemInfo{
 		attacker := ctx.Player.Name
 		defender := ""
 
+		// ----- 先收集所有 @ 目标 -----
+		var atTargets []string
+		var otherArgs []string
+
 		for i := 2; i < len(parts); i++ {
 			p := parts[i]
+			if strings.HasPrefix(p, "@") {
+				atTargets = append(atTargets, strings.TrimPrefix(p, "@"))
+			} else {
+				otherArgs = append(otherArgs, p)
+			}
+		}
+
+		// ----- 根据 @ 数量分配攻击者和防御者 -----
+		switch len(atTargets) {
+		case 0:
+			// 没有 @，防御者从先攻列表取
+			attacker = ctx.Player.Name
+			defender = ""
+		case 1:
+			// 一个 @ → 防御者
+			attacker = ctx.Player.Name
+			defender = atTargets[0]
+		default:
+			// 两个及以上 @ → 第一个攻击者，第二个防御者
+			attacker = atTargets[0]
+			defender = atTargets[1]
+		}
+
+		// ----- 解析其他参数（物/特、优势/劣势、暴击阈值） -----
+		for _, p := range otherArgs {
 			switch {
 			case p == "物" || p == "物理" || p == "p" || p == "physical":
 				isSpecial = false
@@ -90,14 +125,6 @@ var cmdDmg = &CmdItemInfo{
 				advantage = "优势"
 			case p == "劣势" || p == "劣勢" || p == "dis" || p == "disadvantage":
 				advantage = "劣势"
-			case strings.HasPrefix(p, "@"):
-				target := strings.TrimPrefix(p, "@")
-				if defender == "" {
-					defender = target
-				} else {
-					// 第二个 @ 作为攻击者
-					attacker = target
-				}
 			default:
 				if n, e := strconv.ParseInt(p, 10, 64); e == nil && n >= 2 && n <= 20 {
 					ctLimit = n
@@ -105,11 +132,7 @@ var cmdDmg = &CmdItemInfo{
 			}
 		}
 
-		// 如果只指定了防御者，攻击者保持为当前玩家
-		if defender != "" && attacker == ctx.Player.Name {
-			// 正常情况
-		}
-
+		// 如果还没有防御者，从先攻列表取
 		if defender == "" {
 			riList := (RIList{}).LoadByCurGroup(ctx)
 			for _, item := range riList {
@@ -134,7 +157,7 @@ var cmdDmg = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		// ========== 输出格式 ==========
+		// ========== 输出格式（宝可梦化） ==========
 		var calcText strings.Builder
 		fmt.Fprintf(&calcText, "( %s -> %s | %s", attacker, defender, atkType)
 
@@ -150,7 +173,7 @@ var cmdDmg = &CmdItemInfo{
 		if !result.Hit {
 			fmt.Fprintf(&calcText, " )")
 			ReplyToSender(ctx, msg, calcText.String()+"\n"+
-				fmt.Sprintf("%s 对 %s 使用了 %s 攻击！\n但是攻击没有命中……",
+				fmt.Sprintf("\xf0\x9f\x92\xa8 %s 对 %s 使用了 %s 攻击！\n但 是 没 有 命 中……",
 					attacker, defender, atkType))
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
@@ -173,13 +196,13 @@ var cmdDmg = &CmdItemInfo{
 		// 战斗演说
 		var flavorText strings.Builder
 		if attacker == defender {
-			fmt.Fprintf(&flavorText, "%s 使用了 %s 攻击自己！\n", attacker, atkType)
+			fmt.Fprintf(&flavorText, "\xe2\x9a\x94\xef\xb8\x8f %s 使用了 %s 攻击自己！\n", attacker, atkType)
 		} else {
-			fmt.Fprintf(&flavorText, "%s 对 %s 使用了 %s 攻击！\n", attacker, defender, atkType)
+			fmt.Fprintf(&flavorText, "\xe2\x9a\x94\xef\xb8\x8f %s 对 %s 使用了 %s 攻击！\n", attacker, defender, atkType)
 		}
 
 		if result.Crit {
-			fmt.Fprintf(&flavorText, "命中要害！\n")
+			fmt.Fprintf(&flavorText, "\xf0\x9f\x92\xa5 命中要害！\n")
 		}
 		if result.EffectText != "" {
 			fmt.Fprintf(&flavorText, "%s\n", result.EffectText)
@@ -188,6 +211,43 @@ var cmdDmg = &CmdItemInfo{
 			fmt.Fprintf(&flavorText, "对 %s 没有造成伤害……", defender)
 		} else {
 			fmt.Fprintf(&flavorText, "%s 受到了 %d 点伤害！", defender, result.FinalDmg)
+
+			// ---- HP 条显示 ----
+			// 1. 先检查防御者是否是 NPC（有 HP 数据）
+			if newHp, maxHp, ok := updateNPCHP(ctx, defender, result.FinalDmg); ok && maxHp > 0 {
+				// NPC HP 已在 updateNPCHP 中扣除，直接显示
+				pct := newHp * 10 / maxHp
+				if pct > 10 {
+					pct = 10
+				}
+				if pct < 0 {
+					pct = 0
+				}
+				bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
+				fmt.Fprintf(&flavorText, "\n  📊 HP: %s %d/%d", bar, newHp, maxHp)
+			} else {
+				// 2. 否则检查是否是当前玩家（因为只有当前玩家的上下文可用）
+				if defender == ctx.Player.Name {
+					if hpMax, exists := VarGetValueInt64(ctx, "hpmax"); exists && hpMax > 0 {
+						curHp, _ := VarGetValueInt64(ctx, "hp")
+						newHp := curHp - result.FinalDmg
+						if newHp < 0 {
+							newHp = 0
+						}
+						VarSetValueInt64(ctx, "hp", newHp)
+						pct := newHp * 10 / hpMax
+						if pct > 10 {
+							pct = 10
+						}
+						if pct < 0 {
+							pct = 0
+						}
+						bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
+						fmt.Fprintf(&flavorText, "\n  📊 HP: %s %d/%d", bar, newHp, hpMax)
+					}
+				}
+				// 如果防御者是其他玩家（非当前用户），暂时无法读取其 HP，不显示条
+			}
 		}
 
 		fullText := calcText.String() + "\n" + flavorText.String()
@@ -216,7 +276,7 @@ var cmdStab = &CmdItemInfo{
 		case "list":
 			var typeList []string
 			for _, t := range pmdndTypeNames {
-				if v, _ := VarGetValueInt64(mctx, "$type_"+t); v != 0 {
+				if v, _ := VarGetValueInt64(mctx, "type_"+t); v != 0 {
 					typeList = append(typeList, fmt.Sprintf("%s:%d", t, v))
 				}
 			}
@@ -230,14 +290,14 @@ var cmdStab = &CmdItemInfo{
 			var stabTotal int64
 			var typeNames []string
 			for _, t := range pmdndTypeNames {
-				if v, _ := VarGetValueInt64(mctx, "$stab_"+t); v != 0 {
+				if v, _ := VarGetValueInt64(mctx, "stab_"+t); v != 0 {
 					stabTotal += v
 					typeNames = append(typeNames, t)
 				}
 			}
 			if len(typeNames) == 0 {
 				for _, t := range pmdndTypeNames {
-					if v, _ := VarGetValueInt64(mctx, "$type_"+t); v != 0 {
+					if v, _ := VarGetValueInt64(mctx, "type_"+t); v != 0 {
 						stabTotal += v
 						typeNames = append(typeNames, t)
 					}

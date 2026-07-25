@@ -206,11 +206,11 @@ var cmdMove = &CmdItemInfo{
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 
-			// ========== 输出格式 ==========
+			// ========== 输出格式（宝可梦化） ==========
+
+			// 第一部分：详细计算过程（括号包裹）
 			var calcText strings.Builder
 			fmt.Fprintf(&calcText, "( %s -> %s | %s | ", attacker, defender, name)
-
-			// d20 结果
 			if advantage != "" {
 				fmt.Fprintf(&calcText, "d20%s=%d", advantage, result.D20)
 			} else {
@@ -220,7 +220,14 @@ var cmdMove = &CmdItemInfo{
 				fmt.Fprintf(&calcText, " %s", result.CritText)
 			}
 
-			// 基础伤害计算（即使大失败也显示，方便核对）
+			if !result.Hit {
+				fmt.Fprintf(&calcText, " )")
+				ReplyToSender(mctx, msg, calcText.String()+"\n"+
+					fmt.Sprintf("\xf0\x9f\x92\xa8 %s 对 %s 使用了 %s！\n但 是 没 有 命 中……",
+						getPlayerNameTempFunc(mctx), defender, name))
+				return CmdExecuteResult{Matched: true, Solved: true}
+			}
+
 			fmt.Fprintf(&calcText, " | 基础: %d*%d*%d*%d%%/(100*%d)=%d",
 				power, result.BattleLv, result.AtkVal, result.RollPct, result.DefVal, result.BaseDmg)
 
@@ -234,36 +241,54 @@ var cmdMove = &CmdItemInfo{
 					fmt.Fprintf(&calcText, " => %d", result.FinalDmg)
 				}
 			}
-
-			// 资源消耗信息
 			fmt.Fprintf(&calcText, " | PP %d/%d", pp-1, ppmax)
 			if ringText != "" {
 				fmt.Fprintf(&calcText, " | %s", ringText)
 			}
 			fmt.Fprintf(&calcText, " )")
 
-			// ----- 战斗演说 -----
+			// 战斗演说
 			var flavorText strings.Builder
-			fmt.Fprintf(&flavorText, "%s 对 %s 使用了 %s！\n",
+			fmt.Fprintf(&flavorText, "\xe2\x9a\x94\xef\xb8\x8f %s 对 %s 使用了 %s！\n",
 				getPlayerNameTempFunc(mctx), defender, name)
 
-			if !result.Hit {
-				fmt.Fprintf(&flavorText, "但是攻击没有命中……")
+			if result.Crit {
+				fmt.Fprintf(&flavorText, "\xf0\x9f\x92\xa5 命中要害！\n")
+			}
+			if result.EffectText != "" {
+				fmt.Fprintf(&flavorText, "%s\n", result.EffectText)
+			}
+			if result.FinalDmg == 0 {
+				fmt.Fprintf(&flavorText, "对 %s 没有造成伤害……", defender)
 			} else {
-				if result.Crit {
-					fmt.Fprintf(&flavorText, "命中要害！\n")
-				}
-				if result.EffectText != "" {
-					fmt.Fprintf(&flavorText, "%s\n", result.EffectText)
-				}
-				if result.FinalDmg == 0 {
-					fmt.Fprintf(&flavorText, "对 %s 没有造成伤害……", defender)
-				} else {
-					fmt.Fprintf(&flavorText, "%s 受到了 %d 点伤害！", defender, result.FinalDmg)
+				fmt.Fprintf(&flavorText, "%s 受到了 %d 点伤害！", defender, result.FinalDmg)
+				// HP条
+				// 优先检查防御者是否为 NPC 且已有 HP
+				if newHp, maxHp, ok := updateNPCHP(ctx, defender, result.FinalDmg); ok && maxHp > 0 {
+					pct := newHp * 10 / maxHp
+					if pct > 10 {
+						pct = 10
+					}
+					if pct < 0 {
+						pct = 0
+					}
+					bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
+					fmt.Fprintf(&flavorText, "\n  📊 HP: %s %d/%d", bar, newHp, maxHp)
+				} else if hpMax, exists := VarGetValueInt64(ctx, "hpmax"); exists && hpMax > 0 {
+					// 防御者是玩家
+					curHp, _ := VarGetValueInt64(ctx, "hp")
+					pct := curHp * 10 / hpMax
+					if pct > 10 {
+						pct = 10
+					}
+					if pct < 0 {
+						pct = 0
+					}
+					bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
+					fmt.Fprintf(&flavorText, "\n  📊 HP: %s %d/%d", bar, curHp, hpMax)
 				}
 			}
 
-			// 合并输出
 			fullText := calcText.String() + "\n" + flavorText.String()
 			ReplyToSender(mctx, msg, fullText)
 

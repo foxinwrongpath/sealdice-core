@@ -65,18 +65,27 @@ var cmdRing = &CmdItemInfo{
 		switch sub {
 		case "show", "":
 			var texts []string
+			hasRing := false
 			for i := 1; i < 10; i++ {
 				ringCur, _ := VarGetValueInt64(mctx, fmt.Sprintf("$环位_%d", i))
 				ringMax, exists := VarGetValueInt64(mctx, fmt.Sprintf("$环位上限_%d", i))
 				if exists {
-					texts = append(texts, fmt.Sprintf("%d环:%d/%d", i, ringCur, ringMax))
+					hasRing = true
+					// 进度条
+					pct := ringCur * 10 / ringMax
+					if pct > 10 {
+						pct = 10
+					}
+					bar := strings.Repeat("\xe2\x96\x88", int(pct)) + strings.Repeat("\xe2\x96\x91", 10-int(pct))
+					texts = append(texts, fmt.Sprintf("%d环: %d/%d %s", i, ringCur, ringMax, bar))
 				}
 			}
-			summary := strings.Join(texts, ", ")
-			if summary == "" {
-				summary = "没有设置过环位"
+			if !hasRing {
+				ReplyToSender(mctx, msg, "没有设置过环位")
+			} else {
+				playerName := getPlayerNameTempFunc(mctx)
+				ReplyToSender(mctx, msg, fmt.Sprintf("\xf0\x9f\x92\x8d %s 的招式能量：\n%s", playerName, strings.Join(texts, "\n")))
 			}
-			ReplyToSender(mctx, msg, fmt.Sprintf("%s的环位状况: %s", getPlayerNameTempFunc(mctx), summary))
 
 		case "init":
 			reSlot := regexp.MustCompile(`\d+`)

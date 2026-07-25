@@ -1,7 +1,5 @@
 package dice
 
-import "fmt"
-
 // DamageResult 伤害计算结果
 type DamageResult struct {
 	BaseDmg    int64   // 基础伤害（未修正）
@@ -14,7 +12,6 @@ type DamageResult struct {
 	EffectText string  // 效果文本（"效果拔群！"等）
 	Hit        bool    // 是否命中
 	Crit       bool    // 是否暴击
-	MoveName   string  // 招式名称（用于输出）
 	Attacker   string  // 攻击者名称
 	Defender   string  // 防御者名称
 	Power      int64   // 招式威力
@@ -48,7 +45,6 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	defCtx := ctx
 
 	// ----- 1. 获取攻击者攻击值 -----
-	// 优先从 NPC 数据读取，否则从上下文读取，最后使用默认值 10
 	atkVal := int64(10)
 	if !isSpecial {
 		// 物理攻击：读取 patk
@@ -96,9 +92,13 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		}
 	}
 
-	// ----- 3. 获取战斗等级 -----
+	// ----- 3. 获取战斗等级（默认30，符合PMDnD初始CR） -----
 	battleLv := int64(30)
-	if v, _ := VarGetValueInt64(attackerCtx, "战斗等级"); v != 0 {
+
+	// 优先从攻击者 NPC 数据读取 cr
+	if v := getNPCAttr(ctx, attacker, "cr"); v > 0 {
+		battleLv = v
+	} else if v, _ := VarGetValueInt64(attackerCtx, "战斗等级"); v != 0 {
 		battleLv = v
 	}
 
@@ -128,7 +128,6 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	result.RollPct = rollPct
 
 	// ----- 6. 计算基础伤害 -----
-	// 公式: (威力 * 战斗等级 * 攻击值 * 百分比) / (100 * 防御值)
 	totalDmg := (power * battleLv * atkVal * rollPct) / (100 * defVal)
 	if totalDmg < 1 {
 		totalDmg = 1
@@ -139,17 +138,14 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	result.BaseDmg = totalDmg
 
 	// ----- 7. STAB 计算（本系加成） -----
-	// 从 NPC 数据或上下文读取攻击者的属性类型列表
 	atkTypes := []string{}
 	for _, t := range pmdndTypeNames {
 		key := "type_" + t
-		// 优先从 NPC 数据读取
 		if v := getNPCAttr(ctx, attacker, key); v > 0 {
 			atkTypes = append(atkTypes, t)
 			continue
 		}
-		// 回退到上下文
-		if v, _ := VarGetValueInt64(attackerCtx, "$type_"+t); v > 0 {
+		if v, _ := VarGetValueInt64(attackerCtx, key); v > 0 {
 			atkTypes = append(atkTypes, t)
 		}
 	}
@@ -157,15 +153,12 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	stabMul := 1.0
 	for _, t := range atkTypes {
 		if t == atkType {
-			// 检查是否设置了 STAB 加成值
 			key := "stab_" + t
-			// 优先从 NPC 数据读取
 			if v := getNPCAttr(ctx, attacker, key); v > 0 {
 				stabMul = (100.0 + float64(v)) / 100.0
-			} else if v, _ := VarGetValueInt64(attackerCtx, "$stab_"+t); v > 0 {
+			} else if v, _ := VarGetValueInt64(attackerCtx, key); v > 0 {
 				stabMul = (100.0 + float64(v)) / 100.0
 			} else {
-				// 默认本系加成 50%
 				stabMul = 1.5
 			}
 			break
@@ -173,22 +166,24 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 	result.StabMul = stabMul
 
-	// ----- 8. 属性克制计算 -----
+	// ----- 8. 属性克制计算（支持多属性叠加） -----
 	typeMod := 0.0
-	if defender != "" {
+	if defender != "" && defender != "目标" {
 		for _, t := range pmdndTypeNames {
 			key := "type_" + t
-			// 优先从 NPC 数据读取
+			var typeVal int64
+
+			// 检查 NPC
 			if v := getNPCAttr(ctx, defender, key); v > 0 {
-				if m, ok := pmdndTypeChart[atkType][t]; ok {
-					typeMod += m
-				}
-				continue
+				typeVal = v
+			} else if v, _ := VarGetValueInt64(defCtx, key); v > 0 {
+				typeVal = v
 			}
-			// 回退到上下文
-			if v, _ := VarGetValueInt64(defCtx, "$type_"+t); v > 0 {
+
+			if typeVal > 0 {
 				if m, ok := pmdndTypeChart[atkType][t]; ok {
-					typeMod += m
+					// 克制系数乘以属性层数（type_火:1 表示一层）
+					typeMod += m * float64(typeVal)
 				}
 			}
 		}
@@ -198,9 +193,6 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	// ----- 9. 计算最终伤害（应用 STAB 和克制修正） -----
 	finalDmg := totalDmg
 	if typeMod != 0 || stabMul != 1.0 {
-		// 克制倍率: (2.0 + typeMod) / 2.0
-		// 例如 typeMod=1 (2倍克制) => (2+1)/2 = 1.5
-		// 例如 typeMod=-1 (2倍抵抗) => (2-1)/2 = 0.5
 		factor := (2.0 + typeMod) / 2.0
 		if factor < 0.25 {
 			factor = 0.25
@@ -221,7 +213,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	result.Hit = rollPct > 0
 	result.Crit = result.CritText != "" && result.CritText != "【大失败】"
 
-	// 计算总修正系数
+	// 计算总修正系数用于效果文本
 	totalFactor := 1.0
 	if typeMod != 0 || stabMul != 1.0 {
 		factor := (2.0 + typeMod) / 2.0
@@ -233,7 +225,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 
 	// 判定效果文本
 	if finalDmg == 0 && rollPct != 0 {
-		result.EffectText = fmt.Sprintf("对 %s 没有效果……", defender)
+		result.EffectText = "对 " + defender + " 没有效果……"
 	} else if totalFactor >= 2.0 {
 		result.EffectText = "效果拔群！"
 	} else if totalFactor <= 0.5 && totalFactor > 0 {

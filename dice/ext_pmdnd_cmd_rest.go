@@ -30,36 +30,47 @@ var cmdRest = &CmdItemInfo{
 		}
 
 		recoveryRate := int64(1)
-		restType := "长休"
 		if isShort {
 			recoveryRate = 2
-			restType = "短休"
 		}
 
+		playerName := getPlayerNameTempFunc(mctx)
 		hpText := "没有设置hpmax，无法回复hp"
 		hpMax, exists := VarGetValueInt64(mctx, "hpmax")
+		var newHp int64
 		if exists {
 			curHp, _ := VarGetValueInt64(mctx, "hp")
-			recoveredHP := hpMax / recoveryRate
-			if isShort && curHp > recoveredHP && curHp <= hpMax {
-				recoveredHP = curHp
+			newHp = hpMax / recoveryRate
+			if isShort && curHp > newHp && curHp <= hpMax {
+				newHp = curHp
 			}
-			if recoveryRate == 1 {
-				recoveredHP = hpMax
+			if !isShort {
+				newHp = hpMax
 			}
-			VarSetValueInt64(mctx, "hp", recoveredHP)
-			hpText = fmt.Sprintf("hp恢复至%d", recoveredHP)
+			VarSetValueInt64(mctx, "hp", newHp)
+			hpText = fmt.Sprintf("%s %d/%d", "❤️", newHp, hpMax)
 		}
 
 		n := spellRingsRenew(mctx, msg)
 		ringText := ""
 		if n > 0 {
-			ringText = "，环位得到了恢复"
+			if isShort {
+				ringText = "\n⚡ 招式能量部分恢复！"
+			} else {
+				ringText = "\n⚡ 招式能量已全部恢复！"
+			}
 		}
 		if ctx.Player.AutoSetNameTemplate != "" {
 			_, _ = SetPlayerGroupCardByTemplate(ctx, ctx.Player.AutoSetNameTemplate)
 		}
-		ReplyToSender(mctx, msg, fmt.Sprintf("%s的%s: %s%s", getPlayerNameTempFunc(mctx), restType, hpText, ringText))
+
+		var fullText string
+		if isShort {
+			fullText = fmt.Sprintf("🌿 %s 进行了短暂休整！\n%s%s", playerName, hpText, ringText)
+		} else {
+			fullText = fmt.Sprintf("🏕️ %s 完成了充分的长休！\n%s%s\n✨ 精力充沛！", playerName, hpText, ringText)
+		}
+		ReplyToSender(mctx, msg, fullText)
 		return CmdExecuteResult{Matched: true, Solved: true}
 	},
 }

@@ -31,22 +31,37 @@ var cmdInit = &CmdItemInfo{
 		sub := cmdArgs.GetArgN(1)
 
 		switch sub {
-		case "list", "":
+		// .init 查看列表
+		case "", "list":
+			var textOut strings.Builder
+			textOut.WriteString("⚡ 行动顺序！\n")
 			riList := (RIList{}).LoadByCurGroup(ctx)
 			round, _ := VarGetValueInt64(ctx, "$g回合数")
-			textOut := DiceFormatTmpl(ctx, "DND:先攻_查看_前缀")
+
 			for order, i := range riList {
-				textOut += fmt.Sprintf("%2d. %s: %d\n", order+1, i.name, i.val)
+				// 箭头：当前回合显示 👉
+				arrow := "  "
+				if int64(order) == round {
+					arrow = "👉"
+				}
+				// 图标：首尾特殊标记
+				var emoji string
+				if order == 0 {
+					emoji = "🚩" // 首位
+				} else if order == len(riList)-1 {
+					emoji = "🏁" // 末位
+				} else {
+					emoji = "🟢" // 中间
+				}
+				_, _ = fmt.Fprintf(&textOut, "%s %s %d. %s: %d\n", arrow, emoji, order+1, i.name, i.val)
 			}
 			if len(riList) == 0 {
-				textOut += "- 没有找到任何单位"
+				textOut.WriteString("没有找到任何单位")
 			} else {
-				if len(riList) <= int(round) || round < 0 {
-					round = 0
-				}
-				textOut += fmt.Sprintf("当前回合：%s", riList[round].name)
+				rounder := riList[round]
+				_, _ = fmt.Fprintf(&textOut, "\n👉 当前回合：%s", rounder.name)
 			}
-			ReplyToSender(ctx, msg, textOut)
+			ReplyToSender(ctx, msg, textOut.String())
 
 		case "add":
 			// 处理 .ri 的快捷添加（兼容多种格式）
