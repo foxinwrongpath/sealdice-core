@@ -8,8 +8,8 @@ var cmdRest = &CmdItemInfo{
 	Name:      "rest",
 	ShortHelp: ".rest {long|short}",
 	Help: "PMDnD 休息:\n" +
-		".rest long    长休（恢复全部HP和环位）\n" +
-		".rest short   短休（恢复一半HP和环位）\n" +
+		".rest long    长休（恢复全部HP和PP）\n" +
+		".rest short   短休（恢复一半HP和PP）\n" +
 		"快捷别名：.长休  .短休",
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
@@ -35,12 +35,14 @@ var cmdRest = &CmdItemInfo{
 		}
 
 		playerName := getPlayerNameTempFunc(mctx)
-		hpText := "没有设置hpmax，无法回复hp"
-		hpMax, exists := VarGetValueInt64(mctx, "hpmax")
-		var newHp int64
-		if exists {
+		var hpText string
+		var ppText string
+
+		// ---- HP 恢复 ----
+		hpMax, hpExists := VarGetValueInt64(mctx, "hpmax")
+		if hpExists {
 			curHp, _ := VarGetValueInt64(mctx, "hp")
-			newHp = hpMax / recoveryRate
+			newHp := hpMax / recoveryRate
 			if isShort && curHp > newHp && curHp <= hpMax {
 				newHp = curHp
 			}
@@ -48,27 +50,38 @@ var cmdRest = &CmdItemInfo{
 				newHp = hpMax
 			}
 			VarSetValueInt64(mctx, "hp", newHp)
-			hpText = fmt.Sprintf("%s %d/%d", "❤️", newHp, hpMax)
+			hpText = fmt.Sprintf("❤️ HP: %d/%d", newHp, hpMax)
+		} else {
+			hpText = "❤️ 未设置 hpmax"
 		}
 
-		n := spellRingsRenew(mctx, msg)
-		ringText := ""
-		if n > 0 {
-			if isShort {
-				ringText = "\n⚡ 招式能量部分恢复！"
-			} else {
-				ringText = "\n⚡ 招式能量已全部恢复！"
+		// ---- PP 恢复（法力值系统） ----
+		ppMax, ppExists := VarGetValueInt64(mctx, "ppmax")
+		if ppExists {
+			curPp, _ := VarGetValueInt64(mctx, "pp")
+			newPp := ppMax / recoveryRate
+			if isShort && curPp > newPp && curPp <= ppMax {
+				newPp = curPp
 			}
+			if !isShort {
+				newPp = ppMax
+			}
+			VarSetValueInt64(mctx, "pp", newPp)
+			ppText = fmt.Sprintf("💎 PP: %d/%d", newPp, ppMax)
+		} else {
+			ppText = "💎 未设置 ppmax（可使用 .st ppmax:XXX 设置）"
 		}
+
 		if ctx.Player.AutoSetNameTemplate != "" {
 			_, _ = SetPlayerGroupCardByTemplate(ctx, ctx.Player.AutoSetNameTemplate)
 		}
 
+		// ---- 输出 ----
 		var fullText string
 		if isShort {
-			fullText = fmt.Sprintf("🌿 %s 进行了短暂休整！\n%s%s", playerName, hpText, ringText)
+			fullText = fmt.Sprintf("🌿 %s 进行了短暂休整！\n%s\n%s", playerName, hpText, ppText)
 		} else {
-			fullText = fmt.Sprintf("🏕️ %s 完成了充分的长休！\n%s%s\n✨ 精力充沛！", playerName, hpText, ringText)
+			fullText = fmt.Sprintf("🏕️ %s 完成了充分的长休！\n%s\n%s\n✨ 精力充沛！", playerName, hpText, ppText)
 		}
 		ReplyToSender(mctx, msg, fullText)
 		return CmdExecuteResult{Matched: true, Solved: true}

@@ -1,6 +1,9 @@
 package dice
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 var pmdndTypeChart = map[string]map[string]float64{
 	"一般":  {},
@@ -48,23 +51,38 @@ func getPMDnDType(name string) string {
 	return name
 }
 
+// getTypeEffectivenessText 返回属性克制的描述文本
+// 在 PMDnD 中，克制是修正值（正负整数），不是直接的倍率
 func getTypeEffectivenessText(mod float64) string {
+	// 先判断修正值类型
 	switch {
 	case mod >= 2:
-		return "4x 倍克制"
+		return fmt.Sprintf("修正 +%.0f (双倍易伤, %.1fx)", mod, (2.0+mod)/2.0)
 	case mod >= 1:
-		return "2x 倍克制"
+		return fmt.Sprintf("修正 +%.0f (易伤, %.1fx)", mod, (2.0+mod)/2.0)
 	case mod > 0:
-		return "1.5x 倍克制"
+		return fmt.Sprintf("修正 +%.1f (易伤, %.1fx)", mod, (2.0+mod)/2.0)
 	case mod == 0:
-		return "正常"
+		return "修正 0 (正常, 1.0x)"
 	case mod > -1:
-		return "1.5x 倍抵抗"
+		return fmt.Sprintf("修正 %.1f (抗性, %.2fx)", mod, 2.0/(2.0-mod))
 	case mod > -2:
-		return "2x 倍抵抗"
+		return fmt.Sprintf("修正 %.0f (抗性, %.2fx)", mod, 2.0/(2.0-mod))
 	case mod >= -3:
-		return "4x 倍抵抗"
+		return fmt.Sprintf("修正 %.0f (强抗性, %.2fx)", mod, 2.0/(2.0-mod))
 	default:
-		return "免疫"
+		return fmt.Sprintf("修正 %.0f (免疫级抗性, %.2fx)", mod, 2.0/(2.0-mod))
+	}
+}
+
+// getTypeModifierText 简化版，只返回修正值说明
+func getTypeModifierText(mod float64) string {
+	switch {
+	case mod >= 1:
+		return fmt.Sprintf("伤害修正 +%.0f", mod)
+	case mod <= -1:
+		return fmt.Sprintf("伤害修正 %.0f", mod)
+	default:
+		return "伤害修正 0"
 	}
 }

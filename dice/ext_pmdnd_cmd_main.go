@@ -21,9 +21,9 @@ func getPmdndHelp() string {
 		"  .ds / .死亡豁免   濒死豁免检定 (查看/调整状态)\n" +
 		"\n" +
 		"💍 资源管理\n" +
-		"  .ring / .环位     环位管理 (PMDnD风格)\n" +
+		"  .ring / .环位     设置最大可用环位（影响PP消耗）\n" +
 		"  .rest             长休/短休 (.rest long/short)\n" +
-		"  .长休 / .短休     快捷休息\n" +
+		"  .长休 / .短休     快捷休息 (恢复HP和PP)\n" +
 		"\n" +
 		"⚔️ 战斗\n" +
 		"  .dmg              伤害计算\n" +
@@ -36,7 +36,7 @@ func getPmdndHelp() string {
 		"  .terrain          场地管理 (电气/青草/精神等)\n" +
 		"\n" +
 		"👾 NPC\n" +
-		"  .npc              NPC属性管理 (含HP/战斗等级)\n" +
+		"  .npc              NPC属性管理 + 招式 + 攻击\n" +
 		"\n" +
 		"🎯 先攻与行动\n" +
 		"  .init             先攻列表管理 (含 .ri 快捷添加)\n" +
@@ -46,7 +46,9 @@ func getPmdndHelp() string {
 		"  .pmdnd            生成属性 (自由分配)\n" +
 		"  .pmdndx           生成属性 (预设模式)\n" +
 		"\n" +
-		"💡 详细帮助: .<命令> help  例: .dmg help\n" +
+		"💡 PP消耗规则: 招式PP = 环位 × 30\n" +
+		"   使用 .st ppmax:XXX 设置最大PP，.st pp:XXX 设置当前PP\n" +
+		"   详细帮助: .<命令> help  例: .dmg help\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 

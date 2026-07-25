@@ -172,7 +172,7 @@ func validateMoveTargets(categoryLower string, targets []string, attacker string
 }
 
 // ---------- executeHealMove ----------
-func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, advantage string, ctLimit int64, attacker string, defender string, pp int64, ppmax int64, ringText string, ring int64, detailMode bool, debugMode bool) CmdExecuteResult {
+func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, advantage string, ctLimit int64, attacker string, defender string, remainingPP int64, detailMode bool, debugMode bool) CmdExecuteResult {
 	healResult, errMsg := calculateHeal(mctx, power, elemType, advantage, ctLimit, attacker, defender)
 	if errMsg != "" {
 		ReplyToSender(mctx, msg, errMsg)
@@ -184,7 +184,11 @@ func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 	var lines []string
 
 	// 1. 骰子行
-	diceLine := fmt.Sprintf("🎲 d20=%d", healResult.D20)
+	diceExpr := "d20"
+	if advantage != "" {
+		diceExpr = "d20" + advantage
+	}
+	diceLine := fmt.Sprintf("🎲 %s=%d", diceExpr, healResult.D20)
 	if healResult.RollPct > 0 {
 		diceLine += fmt.Sprintf(" → %s", pctDisplay)
 	}
@@ -207,8 +211,13 @@ func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 			lines = append(lines, fmt.Sprintf("  STAB: x%.2f", healResult.StabMul))
 		}
 		lines = append(lines, fmt.Sprintf("  最终: %d", healResult.FinalHeal))
-		if ringText != "" || detailMode {
-			lines = append(lines, fmt.Sprintf("  资源: PP %d/%d %s", pp-1, ppmax, ringText))
+		if detailMode {
+			ppmax, _ := VarGetValueInt64(ctx, "ppmax")
+			if ppmax > 0 {
+				lines = append(lines, fmt.Sprintf("  资源: PP %d/%d", remainingPP, ppmax))
+			} else {
+				lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
+			}
 		}
 	} else if detailMode {
 		lines = append(lines, fmt.Sprintf("📐 威力 %d × 100级 × %d治疗 × %s ÷ 200 × %.2f修正 = %d",
@@ -266,7 +275,7 @@ func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 }
 
 // ---------- executeBuffMove ----------
-func executeBuffMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, effectsRaw string, pp int64, ppmax int64, ringText string, detailMode bool, debugMode bool) CmdExecuteResult {
+func executeBuffMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, effectsRaw string, remainingPP int64, detailMode bool, debugMode bool) CmdExecuteResult {
 	if effectsRaw != "" {
 		state := loadBattleState(ctx)
 		effectList := strings.Split(effectsRaw, ",")
@@ -343,7 +352,12 @@ func executeBuffMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 	lines = append(lines, fmt.Sprintf("💪 %s 使用了 %s！", getPlayerNameTempFunc(mctx), name))
 	lines = append(lines, fmt.Sprintf("  %s", stateToString(state)))
 	if debugMode || detailMode {
-		lines = append(lines, fmt.Sprintf("  资源: PP %d/%d %s", pp-1, ppmax, ringText))
+		ppmax, _ := VarGetValueInt64(ctx, "ppmax")
+		if ppmax > 0 {
+			lines = append(lines, fmt.Sprintf("  资源: PP %d/%d", remainingPP, ppmax))
+		} else {
+			lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
+		}
 	}
 
 	ReplyToSender(mctx, msg, strings.Join(lines, "\n"))
@@ -351,9 +365,9 @@ func executeBuffMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 }
 
 // ---------- executeDamageMove ----------
-func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, category string, advantage string, ctLimit int64, attacker string, targets []string, pp int64, ppmax int64, ringText string, hitsStr string, detailMode bool, debugMode bool) CmdExecuteResult {
+func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, category string, advantage string, ctLimit int64, attacker string, targets []string, remainingPP int64, hitsStr string, detailMode bool, debugMode bool) CmdExecuteResult {
 	if hitsStr != "" && hitsStr != "1" {
-		return executeMultiHitMove(ctx, mctx, msg, name, power, elemType, category, advantage, ctLimit, attacker, targets, pp, ppmax, ringText, hitsStr, detailMode, debugMode)
+		return executeMultiHitMove(ctx, mctx, msg, name, power, elemType, category, advantage, ctLimit, attacker, targets, remainingPP, hitsStr, detailMode, debugMode)
 	}
 
 	isSpecial := category == "特" || category == "特殊"
@@ -369,7 +383,11 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 	pctDisplay := fmt.Sprintf("%.0f%%", result.RollPct*100)
 
 	// 1. 骰子行
-	diceLine := fmt.Sprintf("🎲 d20=%d", result.D20)
+	diceExpr := "d20"
+	if advantage != "" {
+		diceExpr = "d20" + advantage
+	}
+	diceLine := fmt.Sprintf("🎲 %s=%d", diceExpr, result.D20)
 	if result.Hit && result.RollPct > 0 {
 		diceLine += fmt.Sprintf(" → %s", pctDisplay)
 	}
@@ -395,19 +413,29 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 					factor = 0.25
 				}
 				if result.StabMul != 1.0 && result.TypeMod != 0 {
-					lines = append(lines, fmt.Sprintf("  STAB: x%.2f  |  克制: x%.2f", result.StabMul, factor))
+					lines = append(lines, fmt.Sprintf("  STAB: x%.2f  |  伤害修正: %+.0f (倍率 %.2fx)",
+						result.StabMul, result.TypeMod, factor))
 				} else if result.StabMul != 1.0 {
 					lines = append(lines, fmt.Sprintf("  STAB: x%.2f", result.StabMul))
 				} else if result.TypeMod != 0 {
-					lines = append(lines, fmt.Sprintf("  克制: x%.2f", factor))
+					factor := (2.0 + result.TypeMod) / 2.0
+					if factor < 0.25 {
+						factor = 0.25
+					}
+					lines = append(lines, fmt.Sprintf("  伤害修正: %+.0f (倍率 %.2fx)", result.TypeMod, factor))
 				}
 			}
 			lines = append(lines, fmt.Sprintf("  最终伤害: %d", result.FinalDmg))
 		} else {
 			lines = append(lines, "  结果: 未命中")
 		}
-		if ringText != "" || detailMode {
-			lines = append(lines, fmt.Sprintf("  资源: PP %d/%d %s", pp-1, ppmax, ringText))
+		if detailMode {
+			ppmax, _ := VarGetValueInt64(ctx, "ppmax")
+			if ppmax > 0 {
+				lines = append(lines, fmt.Sprintf("  资源: PP %d/%d", remainingPP, ppmax))
+			} else {
+				lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
+			}
 		}
 	} else if detailMode && result.Hit {
 		calcLine := fmt.Sprintf("📐 %d × %d级 × %d攻 × %s ÷ %d防", power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal)
@@ -483,7 +511,7 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 }
 
 // ---------- executeMultiHitMove ----------
-func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, category string, advantage string, ctLimit int64, attacker string, targets []string, pp int64, ppmax int64, ringText string, hitsStr string, detailMode bool, debugMode bool) CmdExecuteResult {
+func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, category string, advantage string, ctLimit int64, attacker string, targets []string, remainingPP int64, hitsStr string, detailMode bool, debugMode bool) CmdExecuteResult {
 	if len(targets) > 1 {
 		ReplyToSender(mctx, msg, "多段攻击暂不支持群体，请指定一个目标")
 		return CmdExecuteResult{Matched: true, Solved: true}
@@ -549,10 +577,11 @@ func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name s
 	lines = append(lines, fmt.Sprintf("  总伤害: %d 点！", totalDmg))
 
 	if debugMode || detailMode {
-		if ringText != "" {
-			lines = append(lines, fmt.Sprintf("  资源: PP %d/%d | %s", pp-1, ppmax, ringText))
+		ppmax, _ := VarGetValueInt64(ctx, "ppmax")
+		if ppmax > 0 {
+			lines = append(lines, fmt.Sprintf("  资源: PP %d/%d", remainingPP, ppmax))
 		} else {
-			lines = append(lines, fmt.Sprintf("  资源: PP %d/%d", pp-1, ppmax))
+			lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
 		}
 	}
 
@@ -612,8 +641,7 @@ var cmdMove = &CmdItemInfo{
 		"  多段攻击格式: hits:2-5\n" +
 		"  例: .move add 种子机关枪 25 草 1 物 hits:2-5\n" +
 		".move del <名称>                 删除招式\n" +
-		".move use <名称>                 非战斗使用（仅消耗PP和环位）\n" +
-		".move pp <名称> +/-N             修改招式PP\n" +
+		".move use <名称>                 非战斗使用（仅消耗PP）\n" +
 		".move clr                        清除所有招式\n" +
 		"\n" +
 		"⚔️ 使用招式:\n" +
@@ -626,7 +654,7 @@ var cmdMove = &CmdItemInfo{
 		"  · 使用 @enemies / @allies / @others / @all 指定群体\n" +
 		"\n" +
 		"📝 示例:\n" +
-		"  .move 喷射火焰 @圈圈熊 优势 19          # 常规攻击\n" +
+		"  .move 喷射火焰 @圈圈熊 优势 19          # 常规攻击（显示 d20优势）\n" +
 		"  .move 喷射火焰 @圈圈熊 detail            # 显示简要计算\n" +
 		"  .move 喷射火焰 @圈圈熊 debug             # 显示完整计算\n" +
 		"  .move 治愈波动                          # 默认治疗自己\n" +
@@ -636,10 +664,12 @@ var cmdMove = &CmdItemInfo{
 		"  物: 物理攻击  特: 特殊攻击  治疗: 恢复HP  强化: 提升能力\n" +
 		"\n" +
 		"💡 使用 .buff stat 查看当前战斗状态\n" +
+		"💡 PP消耗 = 环位 × 30，从角色总PP中扣除\n" +
+		"💡 使用 `.st ppmax:XXX` 设置最大PP，`.st pp:XXX` 设置当前PP\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
-		cmdArgs.ChopPrefixToArgsWith("add", "del", "pp", "rm", "clr", "clear", "use")
+		cmdArgs.ChopPrefixToArgsWith("add", "del", "clr", "clear", "use")
 		val := cmdArgs.GetArgN(1)
 		mctx := GetCtxProxyFirst(ctx, cmdArgs)
 		attrs, err := mctx.Dice.AttrsManager.LoadByCtx(mctx)
@@ -713,18 +743,15 @@ var cmdMove = &CmdItemInfo{
 			m.Store("type", ds.NewStrVal(elemType))
 			m.Store("ring", ds.NewIntVal(ds.IntType(ring)))
 			m.Store("category", ds.NewStrVal(category))
-			m.Store("pp", ds.NewIntVal(5))
-			m.Store("ppmax", ds.NewIntVal(5))
 			if len(effects) > 0 {
 				m.Store("effects", ds.NewStrVal(strings.Join(effects, ",")))
 			}
 			if hitsStr != "1" {
 				m.Store("hits", ds.NewStrVal(hitsStr))
 			}
-
 			attrs.Store(key, ds.NewDictVal(&m).V())
 
-			replyMsg := fmt.Sprintf("添加招式: %s 威力%d 类型%s %d环 %s PP:5/5",
+			replyMsg := fmt.Sprintf("添加招式: %s 威力%d 类型%s %d环 %s",
 				name, power, elemType, ring, category)
 			if len(effects) > 0 {
 				replyMsg += fmt.Sprintf(" 效果: %s", strings.Join(effects, ", "))
@@ -760,63 +787,25 @@ var cmdMove = &CmdItemInfo{
 			}
 			dd := val.MustReadDictData()
 
-			ppV, _ := dd.Dict.Load("pp")
 			ringV, _ := dd.Dict.Load("ring")
-			pp, _ := ppV.ReadInt()
 			ring, _ := ringV.ReadInt()
-			ppmaxV, _ := dd.Dict.Load("ppmax")
-			ppmax, _ := ppmaxV.ReadInt()
 
-			if pp <= 0 {
-				ReplyToSender(mctx, msg, fmt.Sprintf("招式%s PP不足，当前%d", name, pp))
+			// 读取全局PP
+			pp, _ := VarGetValueInt64(mctx, "pp")
+			ppConsume := int64(ring) * 30
+			if pp < ppConsume {
+				ReplyToSender(mctx, msg, fmt.Sprintf("PP不足！需要 %d，当前 %d", ppConsume, pp))
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
+			newPP := pp - ppConsume
+			VarSetValueInt64(mctx, "pp", newPP)
 
-			dd.Dict.Store("pp", ds.NewIntVal(pp-1))
-			ringText, ok := spellRingsGet(mctx, int64(ring), -1)
-			if !ok {
-				dd.Dict.Store("pp", ds.NewIntVal(pp))
-				ReplyToSender(mctx, msg, fmt.Sprintf("环位不足: %s", ringText))
-				return CmdExecuteResult{Matched: true, Solved: true}
+			ppmax, _ := VarGetValueInt64(mctx, "ppmax")
+			if ppmax > 0 {
+				ReplyToSender(mctx, msg, fmt.Sprintf("%s使用了%s！ PP: %d/%d", getPlayerNameTempFunc(mctx), name, newPP, ppmax))
+			} else {
+				ReplyToSender(mctx, msg, fmt.Sprintf("%s使用了%s！ PP: %d", getPlayerNameTempFunc(mctx), name, newPP))
 			}
-
-			ReplyToSender(mctx, msg, fmt.Sprintf("%s使用了%s！(非战斗使用) PP: %d/%d (%s)",
-				getPlayerNameTempFunc(mctx), name, pp-1, ppmax, ringText))
-
-		case "pp":
-			name := cmdArgs.GetArgN(2)
-			deltaStr := cmdArgs.GetArgN(3)
-			if name == "" || deltaStr == "" {
-				return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
-			}
-			key := "$move_" + name
-			val, exists := attrs.LoadX(key)
-			if !exists || val.TypeId != ds.VMTypeDict {
-				ReplyToSender(mctx, msg, fmt.Sprintf("未找到招式: %s", name))
-				return CmdExecuteResult{Matched: true, Solved: true}
-			}
-			dd := val.MustReadDictData()
-			ppV, _ := dd.Dict.Load("pp")
-			maxV, _ := dd.Dict.Load("ppmax")
-			curPP, _ := ppV.ReadInt()
-			maxPP, _ := maxV.ReadInt()
-
-			isNeg := strings.HasPrefix(deltaStr, "-")
-			deltaStr = strings.TrimLeft(deltaStr, "+-")
-			delta, _ := strconv.ParseInt(deltaStr, 10, 64)
-			if isNeg {
-				delta = -delta
-			}
-
-			newPP := int64(curPP) + delta
-			if newPP < 0 {
-				newPP = 0
-			}
-			if newPP > int64(maxPP) {
-				newPP = int64(maxPP)
-			}
-			dd.Dict.Store("pp", ds.NewIntVal(ds.IntType(newPP)))
-			ReplyToSender(mctx, msg, fmt.Sprintf("%s PP: %d/%d", name, newPP, maxPP))
 
 		case "clr", "clear":
 			count := 0
@@ -841,26 +830,16 @@ var cmdMove = &CmdItemInfo{
 						}
 						return v.ToString()
 					}
-					readInt := func(k string) ds.IntType {
-						v, ok := dd.Dict.Load(k)
-						if !ok {
-							return 0
-						}
-						ret, _ := v.ReadInt()
-						return ret
-					}
 					name := readStr("name")
 					power := readStr("power")
 					elem := readStr("type")
 					ring := readStr("ring")
 					cat := readStr("category")
-					pp := readInt("pp")
-					ppmax := readInt("ppmax")
 					effects := readStr("effects")
 					hits := readStr("hits")
 
-					line := fmt.Sprintf("%s 威力%s %s %s环 %s PP:%d/%d",
-						name, power, elem, ring, cat, pp, ppmax)
+					line := fmt.Sprintf("%s 威力%s %s %s环 %s",
+						name, power, elem, ring, cat)
 					if effects != "" {
 						line += fmt.Sprintf(" [%s]", effects)
 					}
@@ -900,10 +879,6 @@ var cmdMove = &CmdItemInfo{
 			elemType := typeV.ToString()
 			catV, _ := dd.Dict.Load("category")
 			category := catV.ToString()
-			ppV, _ := dd.Dict.Load("pp")
-			pp, _ := ppV.ReadInt()
-			ppmaxV, _ := dd.Dict.Load("ppmax")
-			ppmax, _ := ppmaxV.ReadInt()
 			ringV, _ := dd.Dict.Load("ring")
 			ring, _ := ringV.ReadInt()
 			effectsStr, _ := dd.Dict.Load("effects")
@@ -916,16 +891,24 @@ var cmdMove = &CmdItemInfo{
 				hitsStr = hitsV.ToString()
 			}
 
-			if pp <= 0 {
-				ReplyToSender(mctx, msg, fmt.Sprintf("招式 %s PP不足，当前%d", name, pp))
+			// ---- 读取全局PP ----
+			pp, _ := VarGetValueInt64(mctx, "pp")
+			ppConsume := int64(ring) * 30
+			if pp < ppConsume {
+				ReplyToSender(mctx, msg, fmt.Sprintf("PP不足！需要 %d，当前 %d", ppConsume, pp))
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
+			newPP := pp - ppConsume
+			VarSetValueInt64(mctx, "pp", newPP)
 
+			// ---- 解析目标和参数 ----
 			attacker := mctx.Player.Name
 			targets, advantage, ctLimit, isGroupMode, detailMode, debugMode := parseMoveTargets(ctx, mctx, cmdArgs, attacker)
 			categoryLower := strings.ToLower(category)
 
 			if ok, errMsg := validateMoveTargets(categoryLower, targets, attacker, isGroupMode); !ok {
+				// 回滚PP
+				VarSetValueInt64(mctx, "pp", pp)
 				ReplyToSender(mctx, msg, errMsg)
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
@@ -938,35 +921,27 @@ var cmdMove = &CmdItemInfo{
 				}
 			}
 
-			dd.Dict.Store("pp", ds.NewIntVal(pp-1))
-			ringText, ok := spellRingsGet(mctx, int64(ring), -1)
-			if !ok {
-				dd.Dict.Store("pp", ds.NewIntVal(pp))
-				ReplyToSender(mctx, msg, fmt.Sprintf("环位不足: %s", ringText))
-				return CmdExecuteResult{Matched: true, Solved: true}
-			}
-
+			// 根据类别分发
 			if categoryLower == "治疗" || categoryLower == "heal" {
 				if len(targets) > 1 {
-					dd.Dict.Store("pp", ds.NewIntVal(pp))
-					spellRingsGet(mctx, int64(ring), 1)
+					VarSetValueInt64(mctx, "pp", pp)
 					ReplyToSender(mctx, msg, "治疗只能指定一个目标，暂不支持群体")
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
-				return executeHealMove(ctx, mctx, msg, name, int64(power), elemType, advantage, ctLimit, attacker, targets[0], int64(pp), int64(ppmax), ringText, int64(ring), detailMode, debugMode)
+				return executeHealMove(ctx, mctx, msg, name, int64(power), elemType, advantage, ctLimit, attacker, targets[0], newPP, detailMode, debugMode)
 			}
 
 			if categoryLower == "强化" || categoryLower == "buff" {
 				if len(targets) != 1 || targets[0] != attacker {
-					dd.Dict.Store("pp", ds.NewIntVal(pp))
-					spellRingsGet(mctx, int64(ring), 1)
+					VarSetValueInt64(mctx, "pp", pp)
 					ReplyToSender(mctx, msg, "强化招式只能对自己使用")
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
-				return executeBuffMove(ctx, mctx, msg, name, effectsRaw, int64(pp), int64(ppmax), ringText, detailMode, debugMode)
+				return executeBuffMove(ctx, mctx, msg, name, effectsRaw, newPP, detailMode, debugMode)
 			}
 
-			return executeDamageMove(ctx, mctx, msg, name, int64(power), elemType, category, advantage, ctLimit, attacker, targets, int64(pp), int64(ppmax), ringText, hitsStr, detailMode, debugMode)
+			// 默认：伤害
+			return executeDamageMove(ctx, mctx, msg, name, int64(power), elemType, category, advantage, ctLimit, attacker, targets, newPP, hitsStr, detailMode, debugMode)
 		}
 		return CmdExecuteResult{Matched: true, Solved: true}
 	},

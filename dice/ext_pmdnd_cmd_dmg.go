@@ -380,13 +380,64 @@ var cmdType = &CmdItemInfo{
 				mod := checkChart[defType]
 				VarSetValueStr(ctx, "$t攻击类型", atkType)
 				VarSetValueStr(ctx, "$t防御类型", defType)
-				ReplyToSender(ctx, msg, fmt.Sprintf("%s -> %s: %s (%.0fx)", atkType, defType, getTypeEffectivenessText(mod), mod*2+2))
+				// 计算倍率
+				var ratio float64
+				if mod >= 0 {
+					ratio = (2.0 + mod) / 2.0
+				} else {
+					ratio = 2.0 / (2.0 - mod)
+				}
+				// 生成描述文本
+				var desc string
+				switch {
+				case mod >= 2:
+					desc = fmt.Sprintf("修正 +%.0f (双倍易伤, %.2fx)", mod, ratio)
+				case mod >= 1:
+					desc = fmt.Sprintf("修正 +%.0f (易伤, %.2fx)", mod, ratio)
+				case mod > 0:
+					desc = fmt.Sprintf("修正 +%.1f (易伤, %.2fx)", mod, ratio)
+				case mod == 0:
+					desc = "修正 0 (正常, 1.00x)"
+				case mod > -1:
+					desc = fmt.Sprintf("修正 %.1f (抗性, %.2fx)", mod, ratio)
+				case mod > -2:
+					desc = fmt.Sprintf("修正 %.0f (抗性, %.2fx)", mod, ratio)
+				case mod >= -3:
+					desc = fmt.Sprintf("修正 %.0f (强抗性, %.2fx)", mod, ratio)
+				default:
+					desc = fmt.Sprintf("修正 %.0f (免疫级抗性, %.2fx)", mod, ratio)
+				}
+				ReplyToSender(ctx, msg, fmt.Sprintf("%s -> %s: %s", atkType, defType, desc))
 			} else {
 				var lines []string
 				for _, defType := range pmdndTypeNames {
 					mod := checkChart[defType]
 					if mod != 0 {
-						lines = append(lines, fmt.Sprintf("%s: %s", defType, getTypeEffectivenessText(mod)))
+						// 计算倍率
+						var ratio float64
+						if mod >= 0 {
+							ratio = (2.0 + mod) / 2.0
+						} else {
+							ratio = 2.0 / (2.0 - mod)
+						}
+						var desc string
+						switch {
+						case mod >= 2:
+							desc = fmt.Sprintf("修正 +%.0f (双倍易伤, %.2fx)", mod, ratio)
+						case mod >= 1:
+							desc = fmt.Sprintf("修正 +%.0f (易伤, %.2fx)", mod, ratio)
+						case mod > 0:
+							desc = fmt.Sprintf("修正 +%.1f (易伤, %.2fx)", mod, ratio)
+						case mod > -1:
+							desc = fmt.Sprintf("修正 %.1f (抗性, %.2fx)", mod, ratio)
+						case mod > -2:
+							desc = fmt.Sprintf("修正 %.0f (抗性, %.2fx)", mod, ratio)
+						case mod >= -3:
+							desc = fmt.Sprintf("修正 %.0f (强抗性, %.2fx)", mod, ratio)
+						default:
+							desc = fmt.Sprintf("修正 %.0f (免疫级抗性, %.2fx)", mod, ratio)
+						}
+						lines = append(lines, fmt.Sprintf("%s: %s", defType, desc))
 					}
 				}
 				if len(lines) == 0 {
