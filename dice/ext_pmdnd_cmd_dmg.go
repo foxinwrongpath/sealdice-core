@@ -10,11 +10,12 @@ import (
 func getDmgHelp() string {
 	return "PMDnD 伤害计算(.dmg):\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n" +
+		".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者] [detail] [debug]\n" +
 		"  例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊\n" +
 		"  例: .dmg 格斗 80 物 @圈圈熊           # 自己攻击圈圈熊\n" +
 		"  例: .dmg 格斗 80 物 @圈圈熊 @伊布     # 圈圈熊攻击伊布\n" +
-		"  例: .dmg 水 60 特 优势\n" +
+		"  例: .dmg 火 80 特 detail               # 显示简要计算\n" +
+		"  例: .dmg 火 80 特 debug                # 显示完整计算\n" +
 		"\n" +
 		"📋 @ 参数规则:\n" +
 		"  一个 @ → 防御者（被攻击的目标），攻击者默认为自己\n" +
@@ -22,8 +23,6 @@ func getDmgHelp() string {
 		"\n" +
 		"👾 NPC使用: 先用 .npc set <名称> <属性>:<值> 设置NPC属性\n" +
 		"   然后 @NPC 即可自动读取攻击/防御数值\n" +
-		"   例: .npc set 圈圈熊 patk:30 pdef:20\n" +
-		"       .dmg 格斗 80 物 @圈圈熊\n" +
 		"\n" +
 		"📋 参数说明:\n" +
 		"  类型: 攻击的属性（火/水/草/格斗/一般等）\n" +
@@ -33,6 +32,8 @@ func getDmgHelp() string {
 		"  暴击阈值: 触发暴击的d20出目（默认20）\n" +
 		"  @攻击者: 攻击者名称（默认自己）\n" +
 		"  @防御者: 防御者名称\n" +
+		"  detail: 显示简要计算过程\n" +
+		"  debug: 显示完整计算详情\n" +
 		"\n" +
 		"💡 不指定 @防御者 时自动从先攻列表选取\n" +
 		"💡 不指定 @攻击者 时默认为自己\n" +
@@ -40,7 +41,7 @@ func getDmgHelp() string {
 }
 
 func getDmgShortHelp() string {
-	return ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n" +
+	return ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者] [detail] [debug]\n" +
 		"示例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊\n" +
 		"一个 @ → 防御者，攻击者是自己\n" +
 		"两个 @ → 第一个攻击者，第二个防御者"
@@ -49,7 +50,7 @@ func getDmgShortHelp() string {
 // ---------- .dmg 命令 ----------
 var cmdDmg = &CmdItemInfo{
 	Name:          "dmg",
-	ShortHelp:     ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]\n示例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊",
+	ShortHelp:     ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者] [detail] [debug]\n示例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊",
 	Help:          getDmgHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
@@ -65,7 +66,7 @@ var cmdDmg = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		// 新格式: <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者]
+		// 新格式: <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者] [detail] [debug]
 		atkType := getPMDnDType(parts[0])
 		if _, ok := pmdndTypeChart[atkType]; !ok {
 			ReplyToSender(ctx, msg, fmt.Sprintf("未知类型: %s，可用类型: %s", parts[0], strings.Join(pmdndTypeNames, " ")))
@@ -84,6 +85,8 @@ var cmdDmg = &CmdItemInfo{
 		ctLimit := int64(20)
 		attacker := ctx.Player.Name
 		defender := ""
+		detailMode := false
+		debugMode := false
 
 		// ----- 先收集所有 @ 目标 -----
 		var atTargets []string
@@ -93,6 +96,10 @@ var cmdDmg = &CmdItemInfo{
 			p := parts[i]
 			if strings.HasPrefix(p, "@") {
 				atTargets = append(atTargets, strings.TrimPrefix(p, "@"))
+			} else if p == "detail" || p == "-d" {
+				detailMode = true
+			} else if p == "debug" || p == "-D" {
+				debugMode = true
 			} else {
 				otherArgs = append(otherArgs, p)
 			}
@@ -101,15 +108,12 @@ var cmdDmg = &CmdItemInfo{
 		// ----- 根据 @ 数量分配攻击者和防御者 -----
 		switch len(atTargets) {
 		case 0:
-			// 没有 @，防御者从先攻列表取
 			attacker = ctx.Player.Name
 			defender = ""
 		case 1:
-			// 一个 @ → 防御者
 			attacker = ctx.Player.Name
 			defender = atTargets[0]
 		default:
-			// 两个及以上 @ → 第一个攻击者，第二个防御者
 			attacker = atTargets[0]
 			defender = atTargets[1]
 		}
@@ -157,77 +161,97 @@ var cmdDmg = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		// ========== 输出格式（宝可梦化） ==========
-		var calcText strings.Builder
-		fmt.Fprintf(&calcText, "( %s -> %s | %s", attacker, defender, atkType)
+		// ========== 输出格式（三段式，与 .move 统一） ==========
+		var lines []string
+		pctDisplay := fmt.Sprintf("%.0f%%", float64(result.RollPct))
 
-		if advantage != "" {
-			fmt.Fprintf(&calcText, " | d20%s=%d", advantage, result.D20)
-		} else {
-			fmt.Fprintf(&calcText, " | d20=%d", result.D20)
+		// 1. 骰子行
+		diceLine := fmt.Sprintf("🎲 d20=%d", result.D20)
+		if result.Hit && result.RollPct > 0 {
+			diceLine += fmt.Sprintf(" → %s", pctDisplay)
 		}
-		if result.CritText != "" {
-			fmt.Fprintf(&calcText, " %s", result.CritText)
+		if result.Crit {
+			diceLine += " 💥暴击"
+		}
+		if result.CritText == "【大失败】" {
+			diceLine += " 💀大失败"
+		}
+		lines = append(lines, diceLine)
+
+		// 2. 详细计算
+		if debugMode {
+			lines = append(lines, fmt.Sprintf("📐 [计算详情]"))
+			lines = append(lines, fmt.Sprintf("  攻击者: %s  |  防御者: %s", attacker, defender))
+			lines = append(lines, fmt.Sprintf("  属性: %s  |  威力: %d", atkType, power))
+			lines = append(lines, fmt.Sprintf("  战斗等级: %d  |  攻击值: %d  |  防御值: %d", result.BattleLv, result.AtkVal, result.DefVal))
+			if result.Hit {
+				lines = append(lines, fmt.Sprintf("  基础: %d × %d × %d × %s ÷ (100 × %d) = %d",
+					power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal, result.BaseDmg))
+				if result.StabMul != 1.0 || result.TypeMod != 0 {
+					factor := (2.0 + result.TypeMod) / 2.0
+					if factor < 0.25 {
+						factor = 0.25
+					}
+					if result.StabMul != 1.0 && result.TypeMod != 0 {
+						lines = append(lines, fmt.Sprintf("  STAB: x%.2f  |  克制: x%.2f", result.StabMul, factor))
+					} else if result.StabMul != 1.0 {
+						lines = append(lines, fmt.Sprintf("  STAB: x%.2f", result.StabMul))
+					} else if result.TypeMod != 0 {
+						lines = append(lines, fmt.Sprintf("  克制: x%.2f", factor))
+					}
+				}
+				lines = append(lines, fmt.Sprintf("  最终伤害: %d", result.FinalDmg))
+			} else {
+				lines = append(lines, "  结果: 未命中")
+			}
+		} else if detailMode && result.Hit {
+			calcLine := fmt.Sprintf("📐 %d × %d级 × %d攻 × %s ÷ %d防",
+				power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal)
+			if result.StabMul != 1.0 || result.TypeMod != 0 {
+				factor := (2.0 + result.TypeMod) / 2.0
+				if factor < 0.25 {
+					factor = 0.25
+				}
+				calcLine += fmt.Sprintf(" × %.2f修正", factor*result.StabMul)
+			}
+			calcLine += fmt.Sprintf(" = %d", result.FinalDmg)
+			lines = append(lines, calcLine)
+		}
+
+		// 3. 战斗演说
+		flavorLines := []string{}
+		if attacker == defender {
+			flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 使用了 %s 攻击自己！", attacker, atkType))
+		} else {
+			flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 对 %s 使用了 %s 攻击！", attacker, defender, atkType))
 		}
 
 		if !result.Hit {
-			fmt.Fprintf(&calcText, " )")
-			ReplyToSender(ctx, msg, calcText.String()+"\n"+
-				fmt.Sprintf("\xf0\x9f\x92\xa8 %s 对 %s 使用了 %s 攻击！\n但 是 没 有 命 中……",
-					attacker, defender, atkType))
-			return CmdExecuteResult{Matched: true, Solved: true}
-		}
-
-		fmt.Fprintf(&calcText, " | 基础: %d*%d*%d*%.0f%%/(100*%d)=%d",
-			power, result.BattleLv, result.AtkVal, result.RollPct*100, result.DefVal, result.BaseDmg)
-
-		if result.StabMul != 1.0 || result.TypeMod != 0 {
-			factor := (2.0 + result.TypeMod) / 2.0
-			if factor < 0.25 {
-				factor = 0.25
-			}
-			fmt.Fprintf(&calcText, " | STAB x%.2f, 克制 x%.2f", result.StabMul, factor)
-			if result.FinalDmg != result.BaseDmg {
-				fmt.Fprintf(&calcText, " => %d", result.FinalDmg)
-			}
-		}
-		fmt.Fprintf(&calcText, " )")
-
-		// 战斗演说
-		var flavorText strings.Builder
-		if attacker == defender {
-			fmt.Fprintf(&flavorText, "\xe2\x9a\x94\xef\xb8\x8f %s 使用了 %s 攻击自己！\n", attacker, atkType)
+			flavorLines = append(flavorLines, "  但 是 没 有 命 中……")
 		} else {
-			fmt.Fprintf(&flavorText, "\xe2\x9a\x94\xef\xb8\x8f %s 对 %s 使用了 %s 攻击！\n", attacker, defender, atkType)
-		}
-
-		if result.Crit {
-			fmt.Fprintf(&flavorText, "\xf0\x9f\x92\xa5 命中要害！\n")
-		}
-		if result.EffectText != "" {
-			fmt.Fprintf(&flavorText, "%s\n", result.EffectText)
-		}
-		if result.FinalDmg == 0 {
-			fmt.Fprintf(&flavorText, "对 %s 没有造成伤害……", defender)
-		} else {
-			fmt.Fprintf(&flavorText, "%s 受到了 %d 点伤害！", defender, result.FinalDmg)
-
-			// ---- HP 条显示 ----
-			// 1. 先检查防御者是否是 NPC（有 HP 数据）
-			if newHp, maxHp, ok := updateNPCHP(ctx, defender, result.FinalDmg); ok && maxHp > 0 {
-				// NPC HP 已在 updateNPCHP 中扣除，直接显示
-				pct := newHp * 10 / maxHp
-				if pct > 10 {
-					pct = 10
-				}
-				if pct < 0 {
-					pct = 0
-				}
-				bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
-				fmt.Fprintf(&flavorText, "\n  📊 HP: %s %d/%d", bar, newHp, maxHp)
+			if result.Crit {
+				flavorLines = append(flavorLines, "  命中要害！")
+			}
+			if result.EffectText != "" {
+				flavorLines = append(flavorLines, fmt.Sprintf("  %s", result.EffectText))
+			}
+			if result.FinalDmg == 0 {
+				flavorLines = append(flavorLines, fmt.Sprintf("  对 %s 没有造成伤害……", defender))
 			} else {
-				// 2. 否则检查是否是当前玩家（因为只有当前玩家的上下文可用）
-				if defender == ctx.Player.Name {
+				flavorLines = append(flavorLines, fmt.Sprintf("  %s 受到了 %d 点伤害！", defender, result.FinalDmg))
+
+				// HP 条
+				if newHp, maxHp, ok := updateNPCHP(ctx, defender, result.FinalDmg); ok && maxHp > 0 {
+					pct := newHp * 10 / maxHp
+					if pct > 10 {
+						pct = 10
+					}
+					if pct < 0 {
+						pct = 0
+					}
+					bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
+					flavorLines = append(flavorLines, fmt.Sprintf("  📊 HP: %s %d/%d", bar, newHp, maxHp))
+				} else if defender == ctx.Player.Name {
 					if hpMax, exists := VarGetValueInt64(ctx, "hpmax"); exists && hpMax > 0 {
 						curHp, _ := VarGetValueInt64(ctx, "hp")
 						newHp := curHp - result.FinalDmg
@@ -243,14 +267,13 @@ var cmdDmg = &CmdItemInfo{
 							pct = 0
 						}
 						bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
-						fmt.Fprintf(&flavorText, "\n  📊 HP: %s %d/%d", bar, newHp, hpMax)
+						flavorLines = append(flavorLines, fmt.Sprintf("  📊 HP: %s %d/%d", bar, newHp, hpMax))
 					}
 				}
-				// 如果防御者是其他玩家（非当前用户），暂时无法读取其 HP，不显示条
 			}
 		}
 
-		fullText := calcText.String() + "\n" + flavorText.String()
+		fullText := strings.Join(lines, "\n") + "\n" + strings.Join(flavorLines, "\n")
 		ReplyToSender(ctx, msg, fullText)
 		return CmdExecuteResult{Matched: true, Solved: true}
 	},
