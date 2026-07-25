@@ -9,7 +9,7 @@ var cmdRest = &CmdItemInfo{
 	ShortHelp: ".rest {long|short}",
 	Help: "PMDnD 休息:\n" +
 		".rest long    长休（恢复全部HP和PP）\n" +
-		".rest short   短休（恢复一半HP和PP）\n" +
+		".rest short   短休（恢复最大值的50%）\n" +
 		"快捷别名：.长休  .短休",
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
@@ -36,10 +36,15 @@ var cmdRest = &CmdItemInfo{
 		// ---- HP 恢复 ----
 		hpMax, hpExists := VarGetValueInt64(mctx, "hpmax")
 		if hpExists {
+			curHp, _ := VarGetValueInt64(mctx, "hp")
 			var newHp int64
 			if isShort {
-				// 短休：固定恢复一半
-				newHp = hpMax / 2
+				// 短休：当前值 + 最大值的一半
+				recoverAmount := hpMax / 2
+				newHp = curHp + recoverAmount
+				if newHp > hpMax {
+					newHp = hpMax
+				}
 			} else {
 				// 长休：恢复全部
 				newHp = hpMax
@@ -56,10 +61,15 @@ var cmdRest = &CmdItemInfo{
 		// ---- PP 恢复（法力值系统） ----
 		ppMax, ppExists := VarGetValueInt64(mctx, "ppmax")
 		if ppExists {
+			curPp, _ := VarGetValueInt64(mctx, "pp")
 			var newPp int64
 			if isShort {
-				// 短休：固定恢复一半
-				newPp = ppMax / 2
+				// 短休：当前值 + 最大值的一半
+				recoverAmount := ppMax / 2
+				newPp = curPp + recoverAmount
+				if newPp > ppMax {
+					newPp = ppMax
+				}
 			} else {
 				// 长休：恢复全部
 				newPp = ppMax

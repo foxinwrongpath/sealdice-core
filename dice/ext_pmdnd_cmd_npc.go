@@ -550,6 +550,8 @@ func getNpcHelp() string {
 		"📖 基础操作:\n" +
 		"  .npc new <名称>                      创建新NPC\n" +
 		"  .npc <名称> st <属性1>:<值1> ...     设置属性（类似 .st）\n" +
+		"  .npc <名称> st <属性1>+<值1>         增加属性（支持表达式如 2d5）\n" +
+		"  .npc <名称> st <属性1>-<值1>         减少属性（支持表达式如 2d5）\n" +
 		"  .npc <名称> show                     查看NPC属性\n" +
 		"  .npc list                            列出所有NPC\n" +
 		"  .npc del <名称>                      删除NPC\n" +
@@ -575,6 +577,7 @@ func getNpcHelp() string {
 		"📝 示例:\n" +
 		"  .npc new 圈圈熊\n" +
 		"  .npc 圈圈熊 st patk:30 pdef:20 hpmax:100 type_格斗:1\n" +
+		"  .npc 圈圈熊 st hp-2d5                   # 减少HP\n" +
 		"  .npc 圈圈熊 move add 臂锤 80 格斗 2 物\n" +
 		"  .npc 圈圈熊 move 臂锤 @伊布\n" +
 		"  .npc 圈圈熊 show\n" +
@@ -590,7 +593,7 @@ var cmdNPC = &CmdItemInfo{
 	Help:          getNpcHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
-		// cmdArgs.CleanArgs 不包含命令名，直接分割参数
+		// 统一使用 parts 解析所有参数
 		parts := strings.Fields(cmdArgs.CleanArgs)
 		if len(parts) == 0 {
 			ReplyToSender(ctx, msg, getNpcHelp())
@@ -687,32 +690,153 @@ var cmdNPC = &CmdItemInfo{
 
 		// ============================================
 		// .npc <名称> st <属性1>:<值1> ...
+		// .npc <名称> st <属性1>+<值1> ...
+		// .npc <名称> st <属性1>-<值1> ...
 		// ============================================
 		if sub == "st" || sub == "属性" {
-			if len(parts) < 3 {
+			props := data[npcName]
+			// 修复：属性参数从 parts[2:] 开始（原来是 parts[3:]）
+			args := parts[2:]
+			if len(args) == 0 {
 				ReplyToSender(ctx, msg, "请指定属性: .npc <名称> st <属性1>:<值1> ...")
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
-			props := data[npcName]
-			args := parts[2:] // 属性对列表
 
 			var setItems []string
+
 			for _, arg := range args {
-				kv := strings.SplitN(arg, ":", 2)
-				if len(kv) != 2 {
-					ReplyToSender(ctx, msg, fmt.Sprintf("属性格式错误: %s，应为 属性:值", arg))
+				// 尝试匹配操作符: 属性:值 (赋值) 或 属性+值 (增加) 或 属性-值 (减少)
+				var op string
+				var key, valStr string
+
+				if strings.Contains(arg, ":") {
+					op = ":"
+					parts2 := strings.SplitN(arg, ":", 2)
+					key = strings.TrimSpace(parts2[0])
+					valStr = strings.TrimSpace(parts2[1])
+				} else if strings.Contains(arg, "+") {
+					op = "+"
+					parts2 := strings.SplitN(arg, "+", 2)
+					key = strings.TrimSpace(parts2[0])
+					valStr = strings.TrimSpace(parts2[1])
+				} else if strings.Contains(arg, "-") && !strings.HasPrefix(arg, "-") {
+					op = "-"
+					parts2 := strings.SplitN(arg, "-", 2)
+					key = strings.TrimSpace(parts2[0])
+					valStr = strings.TrimSpace(parts2[1])
+				} else {
+					ReplyToSender(ctx, msg, fmt.Sprintf("属性格式错误: %s，应为 属性:值 或 属性+值 或 属性-值", arg))
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
-				key := strings.TrimSpace(kv[0])
-				valStr := strings.TrimSpace(kv[1])
-				if i, err := strconv.ParseInt(valStr, 10, 64); err == nil {
-					props[key] = int(i)
-				} else if f, err := strconv.ParseFloat(valStr, 64); err == nil {
-					props[key] = f
-				} else {
-					props[key] = valStr
+
+				if key == "" {
+					ReplyToSender(ctx, msg, fmt.Sprintf("属性名不能为空: %s", arg))
+					return CmdExecuteResult{Matched: true, Solved: true}
 				}
-				setItems = append(setItems, fmt.Sprintf("%s:%s", key, valStr))
+
+				var finalVal interface{}
+
+				if op == ":" {
+					// 赋值模式：直接设置值
+					if i, err := strconv.ParseInt(valStr, 10, 64); err == nil {
+						finalVal = int(i)
+					} else if f, err := strconv.ParseFloat(valStr, 64); err == nil {
+						finalVal = f
+					} else {
+						finalVal = valStr
+					}
+				} else {
+					// 加减模式：读取当前值，计算新值
+					currentVal, exists := props[key]
+					if !exists {
+						ReplyToSender(ctx, msg, fmt.Sprintf("属性 %s 不存在，无法执行 %s 操作。请先设置该属性", key, op))
+						return CmdExecuteResult{Matched: true, Solved: true}
+					}
+
+					var currentNum float64
+					switch v := currentVal.(type) {
+					case int:
+						currentNum = float64(v)
+					case float64:
+						currentNum = v
+					default:
+						ReplyToSender(ctx, msg, fmt.Sprintf("属性 %s 不是数值类型，无法执行加减操作", key))
+						return CmdExecuteResult{Matched: true, Solved: true}
+					}
+
+					// 解析表达式（支持 2d5, 3d6+2 等）
+					ctx.CreateVmIfNotExists()
+					exprResult := ctx.Eval(valStr, nil)
+					var delta float64
+					if ctx.vm.Error != nil {
+						// 尝试直接解析为数字
+						if i, err := strconv.ParseFloat(valStr, 64); err == nil {
+							delta = i
+						} else {
+							ReplyToSender(ctx, msg, fmt.Sprintf("无法解析表达式: %s (%s)", valStr, ctx.vm.Error.Error()))
+							return CmdExecuteResult{Matched: true, Solved: true}
+						}
+					} else if exprResult != nil {
+						if val, ok := exprResult.ReadInt(); ok {
+							delta = float64(val)
+						} else if val, ok := exprResult.ReadFloat(); ok {
+							delta = val
+						} else {
+							ReplyToSender(ctx, msg, fmt.Sprintf("表达式结果不是数值: %s", valStr))
+							return CmdExecuteResult{Matched: true, Solved: true}
+						}
+					} else {
+						ReplyToSender(ctx, msg, fmt.Sprintf("无法解析表达式: %s", valStr))
+						return CmdExecuteResult{Matched: true, Solved: true}
+					}
+
+					// 计算新值
+					if op == "+" {
+						currentNum += delta
+					} else { // op == "-"
+						currentNum -= delta
+					}
+
+					// 对 hp 做边界检查：不能小于 0，不能超过 hpmax
+					if key == "hp" {
+						if currentNum < 0 {
+							currentNum = 0
+						}
+						if hpmaxVal, ok := props["hpmax"]; ok {
+							var hpmaxNum float64
+							switch v := hpmaxVal.(type) {
+							case int:
+								hpmaxNum = float64(v)
+							case float64:
+								hpmaxNum = v
+							default:
+								hpmaxNum = 0
+							}
+							if hpmaxNum > 0 && currentNum > hpmaxNum {
+								currentNum = hpmaxNum
+							}
+						}
+					}
+
+					// 如果是整数，存为 int，否则存为 float64
+					if currentNum == float64(int(currentNum)) {
+						finalVal = int(currentNum)
+					} else {
+						finalVal = currentNum
+					}
+				}
+
+				props[key] = finalVal
+
+				if op == ":" {
+					if s, ok := finalVal.(string); ok {
+						setItems = append(setItems, fmt.Sprintf("%s:%s", key, s))
+					} else {
+						setItems = append(setItems, fmt.Sprintf("%s:%v", key, finalVal))
+					}
+				} else {
+					setItems = append(setItems, fmt.Sprintf("%s%s%s", key, op, valStr))
+				}
 			}
 
 			// 如果设置了 hpmax 但没有 hp，自动同步
@@ -781,7 +905,7 @@ var cmdNPC = &CmdItemInfo{
 
 			switch moveSub {
 			case "add":
-				if len(parts) < 8 { // 需要：名称 move add 招式名 威力 类型 环位 类别 (7个)
+				if len(parts) < 8 {
 					ReplyToSender(ctx, msg, "用法: .npc <名称> move add <招式名> <威力> <类型> <环位> <类别> [hits:2-5]")
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}

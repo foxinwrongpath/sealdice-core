@@ -47,17 +47,20 @@ func parseHitCount(ctx *MsgContext, hitsStr string) int {
 }
 
 // parseMoveTargets 解析 .move 的目标和参数
-func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attacker string) ([]string, string, int64, bool, bool, bool) {
+// 返回值: targets, advantage, ctLimit, isGroupMode, detailMode, debugMode, hasUserTarget
+func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attacker string) ([]string, string, int64, bool, bool, bool, bool) {
 	advantage := ""
 	ctLimit := int64(20)
-	var specifiedTargets []string
+	var specifiedTargets []string // @ 指定的目标
+	var possibleTargets []string  // 不带 @ 的目标名（如 "圈圈熊"）
 	var groupType string
 	isGroupMode := false
 	detailMode := false
 	debugMode := false
+	hasUserTarget := false
 
 	if len(cmdArgs.Args) < 2 {
-		return nil, advantage, ctLimit, isGroupMode, detailMode, debugMode
+		return nil, advantage, ctLimit, isGroupMode, detailMode, debugMode, false
 	}
 	params := cmdArgs.Args[1:]
 
@@ -68,17 +71,25 @@ func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attac
 			case "enemies", "敌人", "敌方":
 				isGroupMode = true
 				groupType = "enemies"
+				hasUserTarget = true
 			case "allies", "友方", "队友":
 				isGroupMode = true
 				groupType = "allies"
+				hasUserTarget = true
 			case "others", "其他", "除己":
 				isGroupMode = true
 				groupType = "others"
+				hasUserTarget = true
 			case "all", "全部", "全体":
 				isGroupMode = true
 				groupType = "all"
+				hasUserTarget = true
+			case "自己", "me":
+				specifiedTargets = append(specifiedTargets, attacker)
+				hasUserTarget = true
 			default:
 				specifiedTargets = append(specifiedTargets, target)
+				hasUserTarget = true
 			}
 		} else if p == "优势" || p == "優勢" || p == "adv" || p == "advantage" {
 			advantage = "优势"
@@ -90,6 +101,10 @@ func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attac
 			debugMode = true
 		} else if n, e := strconv.ParseInt(p, 10, 64); e == nil && n >= 2 && n <= 20 {
 			ctLimit = n
+		} else {
+			// 其他非关键词参数，视为不带 @ 的目标名（如 "圈圈熊"）
+			possibleTargets = append(possibleTargets, p)
+			hasUserTarget = true
 		}
 	}
 
@@ -137,20 +152,15 @@ func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attac
 		}
 	}
 
-	if len(finalTargets) == 0 {
-		riList := (RIList{}).LoadByCurGroup(ctx)
-		for _, item := range riList {
-			if item.name != attacker {
-				finalTargets = append(finalTargets, item.name)
-				break
-			}
-		}
+	// 如果没有 @ 目标和群体模式，但有 possibleTargets，则取第一个作为目标
+	if len(finalTargets) == 0 && !isGroupMode && len(possibleTargets) > 0 {
+		finalTargets = append(finalTargets, possibleTargets[0])
 	}
 
-	return finalTargets, advantage, ctLimit, isGroupMode, detailMode, debugMode
+	return finalTargets, advantage, ctLimit, isGroupMode, detailMode, debugMode, hasUserTarget
 }
 
-// validateMoveTargets 验证目标是否合法
+// validateMoveTargets 验证目标是否合法（目标已非空）
 func validateMoveTargets(categoryLower string, targets []string, attacker string, isGroupMode bool) (bool, string) {
 	if len(targets) == 0 {
 		return false, "没有指定目标"
@@ -650,13 +660,15 @@ var cmdMove = &CmdItemInfo{
 		"🎯 目标选取规则:\n" +
 		"  · 伤害招式: 不指定目标时自动从先攻列表选取第一个非己单位\n" +
 		"  · 治疗/强化: 不指定目标时默认对自己使用\n" +
-		"  · 可使用 @目标 指定任意目标\n" +
+		"  · 可使用 @目标 指定任意目标（支持 @自己）\n" +
 		"  · 使用 @enemies / @allies / @others / @all 指定群体\n" +
 		"\n" +
 		"📝 示例:\n" +
 		"  .move 喷射火焰 @圈圈熊 优势 19          # 常规攻击（显示 d20优势）\n" +
 		"  .move 喷射火焰 @圈圈熊 detail            # 显示简要计算\n" +
 		"  .move 喷射火焰 @圈圈熊 debug             # 显示完整计算\n" +
+		"  .move 剑舞 @自己                         # 强化自己\n" +
+		"  .move 剑舞                               # 默认强化自己\n" +
 		"  .move 治愈波动                          # 默认治疗自己\n" +
 		"  .move 种子机关枪 @圈圈熊                # 多段攻击\n" +
 		"\n" +
@@ -903,9 +915,36 @@ var cmdMove = &CmdItemInfo{
 
 			// ---- 解析目标和参数 ----
 			attacker := mctx.Player.Name
-			targets, advantage, ctLimit, isGroupMode, detailMode, debugMode := parseMoveTargets(ctx, mctx, cmdArgs, attacker)
+			targets, advantage, ctLimit, isGroupMode, detailMode, debugMode, hasUserTarget := parseMoveTargets(ctx, mctx, cmdArgs, attacker)
 			categoryLower := strings.ToLower(category)
 
+			// ==========================================
+			// 目标默认值处理（仅当用户没有指定目标时）
+			// ==========================================
+			if !hasUserTarget {
+				if categoryLower == "治疗" || categoryLower == "heal" || categoryLower == "强化" || categoryLower == "buff" {
+					targets = []string{attacker}
+				} else {
+					// 伤害：从先攻列表取第一个非己单位
+					riList := (RIList{}).LoadByCurGroup(ctx)
+					for _, item := range riList {
+						if item.name != attacker {
+							targets = []string{item.name}
+							break
+						}
+					}
+					if len(targets) == 0 {
+						targets = []string{"目标"}
+					}
+				}
+			}
+
+			// 如果最终还是没有目标（防御性代码）
+			if len(targets) == 0 {
+				targets = []string{"目标"}
+			}
+
+			// ---- 验证目标 ----
 			if ok, errMsg := validateMoveTargets(categoryLower, targets, attacker, isGroupMode); !ok {
 				// 回滚PP
 				VarSetValueInt64(mctx, "pp", pp)
@@ -913,15 +952,7 @@ var cmdMove = &CmdItemInfo{
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 
-			if len(targets) == 0 {
-				if categoryLower == "治疗" || categoryLower == "heal" || categoryLower == "强化" || categoryLower == "buff" {
-					targets = []string{attacker}
-				} else {
-					targets = []string{"目标"}
-				}
-			}
-
-			// 根据类别分发
+			// ---- 根据类别分发 ----
 			if categoryLower == "治疗" || categoryLower == "heal" {
 				if len(targets) > 1 {
 					VarSetValueInt64(mctx, "pp", pp)
