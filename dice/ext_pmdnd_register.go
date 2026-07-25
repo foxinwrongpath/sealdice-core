@@ -25,6 +25,7 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 			"init":   cmdInit,
 			"action": cmdAction,
 			"gen":    cmdGen,
+			"npc":    cmdNPC,
 
 			// 中文别名（保留方便习惯）
 			"属性": cmdSt,
