@@ -876,9 +876,9 @@ var cmdMove = &CmdItemInfo{
 		case "help":
 			return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
 
-		// ========================================
-		// .move <招式名>  使用招式（自动识别类型）
-		// ========================================
+			// ========================================
+			// .move <招式名>  使用招式（自动识别类型）
+			// ========================================
 		default:
 			name := val
 			if name == "" {
@@ -926,19 +926,30 @@ var cmdMove = &CmdItemInfo{
 			targets, advantage, ctLimit, isGroupMode := parseMoveTargets(ctx, mctx, cmdArgs, attacker)
 			categoryLower := strings.ToLower(category)
 
-			// ---- 验证目标 ----
+			// ---- 设置默认目标（在验证之前） ----
+			if len(targets) == 0 {
+				switch categoryLower {
+				case "治疗", "heal", "强化", "buff":
+					targets = []string{attacker}
+				default:
+					// 伤害招式从先攻列表取第一个非己单位
+					riList := (RIList{}).LoadByCurGroup(ctx)
+					for _, item := range riList {
+						if item.name != attacker {
+							targets = []string{item.name}
+							break
+						}
+					}
+					if len(targets) == 0 {
+						targets = []string{"目标"}
+					}
+				}
+			}
+
+			// ---- 验证目标（此时已有目标） ----
 			if ok, errMsg := validateMoveTargets(categoryLower, targets, attacker, isGroupMode); !ok {
 				ReplyToSender(mctx, msg, errMsg)
 				return CmdExecuteResult{Matched: true, Solved: true}
-			}
-
-			// 如果目标为空，设置默认
-			if len(targets) == 0 {
-				if categoryLower == "治疗" || categoryLower == "heal" || categoryLower == "强化" || categoryLower == "buff" {
-					targets = []string{attacker}
-				} else {
-					targets = []string{"目标"}
-				}
 			}
 
 			// ---- 消耗资源 ----
@@ -951,7 +962,8 @@ var cmdMove = &CmdItemInfo{
 			}
 
 			// ---- 根据类别分发 ----
-			if categoryLower == "治疗" || categoryLower == "heal" {
+			switch categoryLower {
+			case "治疗", "heal":
 				if len(targets) > 1 {
 					dd.Dict.Store("pp", ds.NewIntVal(pp))
 					spellRingsGet(mctx, int64(ring), 1)
@@ -959,9 +971,8 @@ var cmdMove = &CmdItemInfo{
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
 				return executeHealMove(ctx, mctx, msg, name, int64(power), elemType, advantage, ctLimit, attacker, targets[0], int64(pp), int64(ppmax), ringText, int64(ring))
-			}
 
-			if categoryLower == "强化" || categoryLower == "buff" {
+			case "强化", "buff":
 				if len(targets) != 1 || targets[0] != attacker {
 					dd.Dict.Store("pp", ds.NewIntVal(pp))
 					spellRingsGet(mctx, int64(ring), 1)
@@ -969,10 +980,11 @@ var cmdMove = &CmdItemInfo{
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
 				return executeBuffMove(ctx, mctx, msg, name, effectsRaw, int64(pp), int64(ppmax), ringText)
-			}
 
-			// 默认：伤害
-			return executeDamageMove(ctx, mctx, msg, name, int64(power), elemType, category, advantage, ctLimit, attacker, targets, int64(pp), int64(ppmax), ringText, hitsStr)
+			default:
+				// 默认：伤害
+				return executeDamageMove(ctx, mctx, msg, name, int64(power), elemType, category, advantage, ctLimit, attacker, targets, int64(pp), int64(ppmax), ringText, hitsStr)
+			}
 		}
 		return CmdExecuteResult{Matched: true, Solved: true}
 	},
