@@ -13,9 +13,16 @@ import (
 var cmdRc = &CmdItemInfo{
 	EnableExecuteTimesParse: true,
 	Name:                    "rc",
-	ShortHelp:               ".rc <属性> // .rc 力量\n.rc <属性>豁免 // .rc 力量豁免\n.rc <表达式> // .rc 力量+3\n.rc 优势 <表达式> // .rc 优势 力量+4\n.rc 劣势 <表达式> [<原因>] // .rc 劣势 力量+4 推一下试试",
-	Help: "PMDnD 检定:\n" +
-		".rc <属性> // .rc 力量\n.rc <属性>豁免 // .rc 力量豁免\n.rc <表达式> // .rc 力量+3\n.rc 优势 <表达式> // .rc 优势 力量+4\n.rc 劣势 <表达式> [<原因>] // .rc 劣势 力量+4 推一下试试",
+	ShortHelp:               ".rc [--hide] [优势/劣势] <表达式> [@目标]",
+	Help: "PMDnD 技能检定:\n" +
+		".rc <表达式>              普通检定\n" +
+		".rc 优势 <表达式>         优势检定\n" +
+		".rc 劣势 <表达式>         劣势检定\n" +
+		".rc --hide <表达式>       暗骰（结果私聊）\n" +
+		".rc <表达式> @某人        为他人检定（需授权）\n" +
+		"示例：.rc 力量+3\n" +
+		"      .rc 优势 力量+3\n" +
+		"      .rc --hide 感知+1",
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		mctx := GetCtxProxyFirst(ctx, cmdArgs)
@@ -27,6 +34,16 @@ var cmdRc = &CmdItemInfo{
 				}
 			}
 		}
+		// 检查 --hide
+		hide := false
+		clean := cmdArgs.CleanArgs
+		if strings.Contains(clean, "--hide") {
+			hide = true
+			// 移除 --hide
+			clean = strings.Replace(clean, "--hide", "", 1)
+			cmdArgs.CleanArgs = clean
+		}
+
 		val := cmdArgs.GetArgN(1)
 		switch val {
 		case "", "help":
@@ -112,7 +129,18 @@ var cmdRc = &CmdItemInfo{
 			} else {
 				text = textList[0]
 			}
-			ReplyToSender(mctx, msg, text)
+
+			if hide {
+				if ctx.Group != nil && !ctx.IsPrivate {
+					ctx.CommandHideFlag = ctx.Group.GroupID
+					ReplyGroup(ctx, msg, DiceFormatTmpl(mctx, "核心:暗骰_群内"))
+					ReplyPerson(ctx, msg, text)
+				} else {
+					ReplyToSender(ctx, msg, text)
+				}
+			} else {
+				ReplyToSender(mctx, msg, text)
+			}
 		}
 		return CmdExecuteResult{Matched: true, Solved: true}
 	},
