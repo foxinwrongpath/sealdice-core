@@ -1,12 +1,18 @@
 package dice
 
+import (
+	"strings"
+)
+
+// ----- 数据结构定义 -----
+
 // DamageResult 伤害计算结果
 type DamageResult struct {
 	BaseDmg    int64   // 基础伤害（未修正）
 	FinalDmg   int64   // 最终伤害（已修正）
 	D20        int64   // d20 出目
 	CritText   string  // 暴击/大失败文本
-	RollPct    int64   // 攻击掷骰百分比
+	RollPct    float64 // 攻击掷骰百分比 (0-1)
 	StabMul    float64 // STAB 倍率
 	TypeMod    float64 // 属性克制修正
 	EffectText string  // 效果文本（"效果拔群！"等）
@@ -21,141 +27,196 @@ type DamageResult struct {
 	BattleLv   int64   // 战斗等级
 }
 
-// calculateDamage 计算伤害
-// 参数:
-//   - ctx: 上下文
-//   - power: 招式威力
-//   - atkType: 攻击属性（如 "火", "水"）
-//   - isSpecial: 是否为特殊攻击（true=特攻/特防，false=物攻/物防）
-//   - advantage: "优势" 或 "劣势" 或 ""
-//   - ctLimit: 暴击阈值 (2-20)
-//   - attacker: 攻击者名称（用于查找 NPC 数据）
-//   - defender: 防御者名称（用于查找 NPC 数据）
-//
-// 返回:
-//   - DamageResult: 伤害计算结果
-//   - string: 错误信息（空表示无错误）
-func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial bool,
-	advantage string, ctLimit int64, attacker string, defender string) (DamageResult, string) {
+// HealResult 治疗计算结果
+type HealResult struct {
+	BaseHeal   int64   // 基础治疗量
+	FinalHeal  int64   // 最终治疗量
+	D20        int64   // d20 出目
+	CritText   string  // 暴击文本
+	RollPct    float64 // 治疗掷骰百分比 (0-1)
+	StabMul    float64 // STAB 倍率
+	Crit       bool    // 是否暴击
+	HealAtkVal int64   // 治疗攻击值（特防）
+}
 
-	var result DamageResult
+// ----- 辅助获取函数 -----
 
-	// 攻击者上下文（用于回退）
+// getAttackValue 获取攻击者的原始攻击值（未应用能力等级修正）
+func getAttackValue(ctx *MsgContext, attacker string, isSpecial bool) int64 {
 	attackerCtx := ctx
-	defCtx := ctx
-
-	// ----- 1. 获取攻击者攻击值 -----
-	rawAtkVal := int64(10)
+	val := int64(10)
 	if !isSpecial {
-		// 物理攻击：读取 patk
-		rawAtkVal = getNPCAttr(ctx, attacker, "patk")
-		if rawAtkVal == 0 {
+		val = getNPCAttr(ctx, attacker, "patk")
+		if val == 0 {
 			if v, _ := VarGetValueInt64(attackerCtx, "patk"); v != 0 {
-				rawAtkVal = v
+				val = v
 			} else {
-				rawAtkVal = 10
+				val = 10
 			}
 		}
 	} else {
-		// 特殊攻击：读取 satk
-		rawAtkVal = getNPCAttr(ctx, attacker, "satk")
-		if rawAtkVal == 0 {
+		val = getNPCAttr(ctx, attacker, "satk")
+		if val == 0 {
 			if v, _ := VarGetValueInt64(attackerCtx, "satk"); v != 0 {
-				rawAtkVal = v
+				val = v
 			} else {
-				rawAtkVal = 10
+				val = 10
 			}
 		}
 	}
+	return val
+}
 
-	// ----- 2. 获取防御者防御值 -----
-	defVal := int64(10)
+// getDefenseValue 获取防御者的防御值
+func getDefenseValue(ctx *MsgContext, defender string, isSpecial bool) int64 {
+	defCtx := ctx
+	val := int64(10)
 	if !isSpecial {
-		// 物理防御：读取 pdef
-		defVal = getNPCAttr(ctx, defender, "pdef")
-		if defVal == 0 {
+		val = getNPCAttr(ctx, defender, "pdef")
+		if val == 0 {
 			if v, _ := VarGetValueInt64(defCtx, "pdef"); v != 0 {
-				defVal = v
+				val = v
 			} else {
-				defVal = 10
+				val = 10
 			}
 		}
 	} else {
-		// 特殊防御：读取 sdef
-		defVal = getNPCAttr(ctx, defender, "sdef")
-		if defVal == 0 {
+		val = getNPCAttr(ctx, defender, "sdef")
+		if val == 0 {
 			if v, _ := VarGetValueInt64(defCtx, "sdef"); v != 0 {
-				defVal = v
+				val = v
 			} else {
-				defVal = 10
+				val = 10
 			}
 		}
 	}
+	return val
+}
 
-	// ----- 3. 获取战斗等级（默认30，符合PMDnD初始CR） -----
-	battleLv := int64(30)
-
-	// 优先从攻击者 NPC 数据读取 cr
+// getBattleLevel 获取攻击者的战斗等级
+func getBattleLevel(ctx *MsgContext, attacker string) int64 {
+	attackerCtx := ctx
+	// 默认30（PMDnD初始CR）
+	level := int64(30)
 	if v := getNPCAttr(ctx, attacker, "cr"); v > 0 {
-		battleLv = v
+		level = v
 	} else if v, _ := VarGetValueInt64(attackerCtx, "战斗等级"); v != 0 {
-		battleLv = v
+		level = v
 	}
+	return level
+}
 
-	// ----- 4. 加载战斗状态（能力等级、护盾等） -----
-	state := loadBattleState(ctx)
-
-	// ----- 5. 应用能力变化等级修正到攻击值 -----
-	levelModifier := 1.0
+// applyAbilityModifier 应用能力等级修正到攻击值
+func applyAbilityModifier(state *BattleState, isSpecial bool, rawAtkVal int64) int64 {
+	modifier := 1.0
 	if isSpecial {
-		// 特殊攻击受特攻等级影响
-		levelModifier = getAbilityModifier(state.SpAttackLevel)
+		modifier = getAbilityModifier(state.SpAttackLevel)
 	} else {
-		// 物理攻击受物攻等级影响
-		levelModifier = getAbilityModifier(state.AttackLevel)
+		modifier = getAbilityModifier(state.AttackLevel)
 	}
-	atkVal := int64(float64(rawAtkVal) * levelModifier)
+	atkVal := int64(float64(rawAtkVal) * modifier)
 	if atkVal < 1 {
 		atkVal = 1
 	}
-	result.AtkVal = atkVal
+	return atkVal
+}
 
-	// ----- 6. 掷骰 (d20) -----
+// applyWeatherModifier 应用天气修正到攻击值
+func applyWeatherModifier(atkType string, state *BattleState) float64 {
+	weatherMod := 1.0
+	switch state.Weather {
+	case "大晴天", "sunny":
+		if atkType == "火" {
+			weatherMod = 1.5
+		} else if atkType == "水" {
+			weatherMod = 0.5
+		}
+	case "下雨", "rain":
+		if atkType == "水" {
+			weatherMod = 1.5
+		} else if atkType == "火" {
+			weatherMod = 0.5
+		}
+	case "沙暴", "sand":
+		if atkType == "岩石" {
+			weatherMod = 1.5
+		}
+	case "冰雹", "hail":
+		if atkType == "冰" {
+			weatherMod = 1.5
+		}
+	case "雪景", "snow":
+		if atkType == "冰" {
+			weatherMod = 1.5
+		}
+	}
+	return weatherMod
+}
+
+// applyTerrainModifier 应用场地修正到攻击值
+func applyTerrainModifier(atkType string, state *BattleState) float64 {
+	terrainMod := 1.0
+	switch state.Terrain {
+	case "电气场地", "electric":
+		if atkType == "电" {
+			terrainMod = 1.3
+		}
+	case "青草场地", "grassy":
+		if atkType == "草" {
+			terrainMod = 1.3
+		}
+	case "精神场地", "psychic":
+		if atkType == "超能力" {
+			terrainMod = 1.3
+		}
+	case "薄雾场地", "misty":
+		if atkType == "妖精" {
+			terrainMod = 1.3
+		}
+	case "龙之场地", "dragon":
+		if atkType == "龙" {
+			terrainMod = 1.3
+		}
+	case "失序场地", "chaos":
+		// 失序场地对所有属性都有加成（除无属性外）
+		if atkType != "一般" && atkType != "力场" {
+			terrainMod = 1.2
+		}
+	}
+	return terrainMod
+}
+
+// rollD20 掷骰并返回结果和百分比
+func rollD20(ctx *MsgContext, advantage string, ctLimit int64) (d20 int64, rollPct float64, critText string) {
 	d20Expr := "d20"
 	if advantage != "" {
 		d20Expr = "d20" + advantage
 	}
-	attackerCtx.CreateVmIfNotExists()
-	r := attackerCtx.Eval(d20Expr, nil)
+	ctx.CreateVmIfNotExists()
+	r := ctx.Eval(d20Expr, nil)
 	if r.vm.Error != nil {
-		return result, "骰点失败: " + r.vm.Error.Error()
+		return 0, 0, "骰点失败: " + r.vm.Error.Error()
 	}
-	d20, _ := r.ReadInt()
-	result.D20 = int64(d20)
+	d, _ := r.ReadInt()
+	d20 = int64(d)
 
-	// ----- 7. 计算攻击掷骰百分比 -----
-	rollPct := int64(d20) * 5
-	if int64(d20) >= ctLimit {
-		rollPct += 50
-		result.CritText = "【暴击+50%】"
+	rollPct = float64(d20) * 0.05
+	if d20 >= ctLimit {
+		rollPct += 0.5
+		critText = "【暴击+50%】"
 	}
-	if int64(d20) == 1 {
+	if d20 == 1 {
 		rollPct = 0
-		result.CritText = "【大失败】"
+		critText = "【大失败】"
 	}
-	result.RollPct = rollPct
+	return
+}
 
-	// ----- 8. 计算基础伤害 -----
-	totalDmg := (power * battleLv * atkVal * rollPct) / (100 * defVal)
-	if totalDmg < 1 {
-		totalDmg = 1
-	}
-	if rollPct == 0 {
-		totalDmg = 0
-	}
-	result.BaseDmg = totalDmg
+// ----- STAB 和克制计算 -----
 
-	// ----- 9. STAB 计算（本系加成） -----
+// calculateSTAB 计算本系加成倍率
+func calculateSTAB(ctx *MsgContext, attacker string, atkType string) float64 {
+	attackerCtx := ctx
 	atkTypes := []string{}
 	for _, t := range pmdndTypeNames {
 		key := "type_" + t
@@ -182,33 +243,116 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 			break
 		}
 	}
-	result.StabMul = stabMul
+	return stabMul
+}
 
-	// ----- 10. 属性克制计算（支持多属性叠加） -----
+// calculateTypeModifier 计算属性克制修正（支持多属性叠加）
+func calculateTypeModifier(ctx *MsgContext, defender string, atkType string) float64 {
+	if defender == "" || defender == "目标" {
+		return 0.0
+	}
+	defCtx := ctx
 	typeMod := 0.0
-	if defender != "" && defender != "目标" {
-		for _, t := range pmdndTypeNames {
-			key := "type_" + t
-			var typeVal int64
-
-			// 检查 NPC
-			if v := getNPCAttr(ctx, defender, key); v > 0 {
-				typeVal = v
-			} else if v, _ := VarGetValueInt64(defCtx, key); v > 0 {
-				typeVal = v
-			}
-
-			if typeVal > 0 {
-				if m, ok := pmdndTypeChart[atkType][t]; ok {
-					// 克制系数乘以属性层数（type_火:1 表示一层）
-					typeMod += m * float64(typeVal)
-				}
+	for _, t := range pmdndTypeNames {
+		key := "type_" + t
+		var typeVal int64
+		if v := getNPCAttr(ctx, defender, key); v > 0 {
+			typeVal = v
+		} else if v, _ := VarGetValueInt64(defCtx, key); v > 0 {
+			typeVal = v
+		}
+		if typeVal > 0 {
+			if m, ok := pmdndTypeChart[atkType][t]; ok {
+				typeMod += m * float64(typeVal)
 			}
 		}
 	}
+	return typeMod
+}
+
+// applyBarrierReduction 应用结界减伤（反射壁/光墙）
+func applyBarrierReduction(state *BattleState, isSpecial bool, damage int64) int64 {
+	if !isSpecial && state.ReflectWall > 0 {
+		return damage / 2
+	}
+	if isSpecial && state.LightScreen > 0 {
+		return damage / 2
+	}
+	return damage
+}
+
+// determineEffectText 判定效果文本
+func determineEffectText(finalDmg int64, rollPct float64, totalFactor float64, defender string) string {
+	if finalDmg == 0 && rollPct > 0 {
+		return "对 " + defender + " 没有效果……"
+	}
+	if totalFactor >= 2.0 {
+		return "效果拔群！"
+	}
+	if totalFactor <= 0.5 && totalFactor > 0 {
+		return "效果不彰……"
+	}
+	return ""
+}
+
+// ----- 主伤害计算函数 -----
+
+// calculateDamage 计算伤害
+func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial bool,
+	advantage string, ctLimit int64, attacker string, defender string) (DamageResult, string) {
+
+	var result DamageResult
+
+	// 1. 获取基础数值
+	rawAtkVal := getAttackValue(ctx, attacker, isSpecial)
+	result.DefVal = getDefenseValue(ctx, defender, isSpecial)
+	battleLv := getBattleLevel(ctx, attacker)
+	result.BattleLv = battleLv
+
+	// 2. 加载战斗状态
+	state := loadBattleState(ctx)
+
+	// 3. 应用天气和场地修正到攻击值
+	weatherMod := applyWeatherModifier(atkType, state)
+	terrainMod := applyTerrainModifier(atkType, state)
+	envMod := weatherMod * terrainMod
+	adjustedRawAtkVal := int64(float64(rawAtkVal) * envMod)
+	if adjustedRawAtkVal < 1 {
+		adjustedRawAtkVal = 1
+	}
+
+	// 4. 应用能力等级修正
+	atkVal := applyAbilityModifier(state, isSpecial, adjustedRawAtkVal)
+	result.AtkVal = atkVal
+
+	// 5. 掷骰
+	d20, rollPct, critText := rollD20(ctx, advantage, ctLimit)
+	if strings.HasPrefix(critText, "骰点") {
+		return result, critText
+	}
+	result.D20 = d20
+	result.RollPct = rollPct
+	result.CritText = critText
+	result.Hit = rollPct > 0
+	result.Crit = critText != "" && critText != "【大失败】"
+
+	// 6. 基础伤害
+	totalDmg := int64(float64(power*battleLv*atkVal) * rollPct / (100.0 * float64(result.DefVal)))
+	if totalDmg < 1 {
+		totalDmg = 1
+	}
+	if rollPct == 0 {
+		totalDmg = 0
+	}
+	result.BaseDmg = totalDmg
+
+	// 7. STAB 和克制
+	stabMul := calculateSTAB(ctx, attacker, atkType)
+	result.StabMul = stabMul
+	typeMod := calculateTypeModifier(ctx, defender, atkType)
 	result.TypeMod = typeMod
 
-	// ----- 11. 计算初步最终伤害（应用 STAB 和克制修正） -----
+	// 8. 应用 STAB 和克制
 	finalDmg := totalDmg
 	if typeMod != 0 || stabMul != 1.0 {
 		factor := (2.0 + typeMod) / 2.0
@@ -219,27 +363,17 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		finalDmg = int64(float64(totalDmg) * factor)
 	}
 
-	// ----- 12. 应用结界减伤（反射壁/光墙） -----
-	if !isSpecial && state.ReflectWall > 0 {
-		// 反射壁：物理伤害减半
-		finalDmg = finalDmg / 2
-	} else if isSpecial && state.LightScreen > 0 {
-		// 光墙：特殊伤害减半
-		finalDmg = finalDmg / 2
-	}
+	// 9. 应用结界减伤
+	finalDmg = applyBarrierReduction(state, isSpecial, finalDmg)
 	result.FinalDmg = finalDmg
 
-	// ----- 13. 填充结果字段 -----
+	// 10. 填充结果字段
 	result.Attacker = attacker
 	result.Defender = defender
 	result.Power = power
 	result.AtkType = atkType
-	result.DefVal = defVal
-	result.BattleLv = battleLv
-	result.Hit = rollPct > 0
-	result.Crit = result.CritText != "" && result.CritText != "【大失败】"
 
-	// 计算总修正系数用于效果文本
+	// 11. 效果文本
 	totalFactor := 1.0
 	if typeMod != 0 || stabMul != 1.0 {
 		factor := (2.0 + typeMod) / 2.0
@@ -248,86 +382,64 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		}
 		totalFactor = factor * stabMul
 	}
+	// 环境修正也影响效果判定
+	totalFactor = totalFactor * envMod
 	// 结界减半也影响效果判定
 	if (!isSpecial && state.ReflectWall > 0) || (isSpecial && state.LightScreen > 0) {
 		totalFactor = totalFactor / 2
 	}
-
-	// 判定效果文本
-	if finalDmg == 0 && rollPct != 0 {
-		result.EffectText = "对 " + defender + " 没有效果……"
-	} else if totalFactor >= 2.0 {
-		result.EffectText = "效果拔群！"
-	} else if totalFactor <= 0.5 && totalFactor > 0 {
-		result.EffectText = "效果不彰……"
-	} else {
-		result.EffectText = ""
-	}
+	result.EffectText = determineEffectText(finalDmg, rollPct, totalFactor, defender)
 
 	return result, ""
 }
 
-// HealResult 治疗计算结果
-type HealResult struct {
-	BaseHeal   int64   // 基础治疗量
-	FinalHeal  int64   // 最终治疗量
-	D20        int64   // d20 出目
-	CritText   string  // 暴击文本
-	RollPct    int64   // 治疗掷骰百分比
-	StabMul    float64 // STAB 倍率
-	Crit       bool    // 是否暴击
-	HealAtkVal int64   // 治疗攻击值（特防）
-}
+// ----- 治疗计算函数 -----
 
 // calculateHeal 计算治疗量
-// 规则: 治疗使用特防作为攻击能力值，防御方能力值固定为200
 func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage string, ctLimit int64, attacker string, defender string) (HealResult, string) {
 	var result HealResult
 
-	attackerCtx := ctx
-
-	// ----- 1. 获取治疗攻击值（特防） -----
+	// 1. 获取治疗攻击值（特防）
 	healAtkVal := getNPCAttr(ctx, attacker, "sdef")
 	if healAtkVal == 0 {
-		if v, _ := VarGetValueInt64(attackerCtx, "sdef"); v != 0 {
+		if v, _ := VarGetValueInt64(ctx, "sdef"); v != 0 {
 			healAtkVal = v
 		} else {
-			healAtkVal = 10 // 默认值
+			healAtkVal = 10
 		}
 	}
 	result.HealAtkVal = healAtkVal
 
-	// ----- 2. 治疗公式：挑战等级固定为 100，防御固定为 200 -----
+	// 2. 治疗公式：挑战等级固定为 100，防御固定为 200
 	battleLv := int64(100)
 	defVal := int64(200)
 
-	// ----- 3. 掷骰 (d20) -----
-	d20Expr := "d20"
-	if advantage != "" {
-		d20Expr = "d20" + advantage
+	// 3. 治疗受青草场地影响
+	state := loadBattleState(ctx)
+	healMod := 1.0
+	if state.Terrain == "青草场地" || state.Terrain == "grassy" {
+		healMod = 1.3
 	}
-	attackerCtx.CreateVmIfNotExists()
-	r := attackerCtx.Eval(d20Expr, nil)
-	if r.vm.Error != nil {
-		return result, "骰点失败: " + r.vm.Error.Error()
-	}
-	d20, _ := r.ReadInt()
-	result.D20 = int64(d20)
 
-	rollPct := int64(d20) * 5
-	if int64(d20) >= ctLimit {
-		rollPct += 50
-		result.CritText = "【暴击+50%】"
+	// 4. 掷骰
+	d20, rollPct, critText := rollD20(ctx, advantage, ctLimit)
+	if strings.HasPrefix(critText, "骰点") {
+		return result, critText
 	}
-	if int64(d20) == 1 {
-		rollPct = 0
-		result.CritText = "【大失败】"
+
+	// 治疗无视大失败：d20=1 时正常计算（5%），而不是0
+	if d20 == 1 && rollPct == 0 {
+		rollPct = 0.05
+		critText = "" // 清除大失败文本
 	}
+
+	result.D20 = d20
 	result.RollPct = rollPct
+	result.CritText = critText
 	result.Crit = int64(d20) >= ctLimit
 
-	// ----- 4. 基础治疗量 -----
-	baseHeal := (power * battleLv * healAtkVal * rollPct) / (100 * defVal)
+	// 5. 基础治疗量
+	baseHeal := int64(float64(power*battleLv*healAtkVal) * rollPct / (100.0 * float64(defVal)))
 	if baseHeal < 1 {
 		baseHeal = 1
 	}
@@ -336,39 +448,17 @@ func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage strin
 	}
 	result.BaseHeal = baseHeal
 
-	// ----- 5. STAB 计算 -----
-	atkTypes := []string{}
-	for _, t := range pmdndTypeNames {
-		key := "type_" + t
-		if v := getNPCAttr(ctx, attacker, key); v > 0 {
-			atkTypes = append(atkTypes, t)
-			continue
-		}
-		if v, _ := VarGetValueInt64(attackerCtx, key); v > 0 {
-			atkTypes = append(atkTypes, t)
-		}
-	}
-
-	stabMul := 1.0
-	for _, t := range atkTypes {
-		if t == atkType {
-			key := "stab_" + t
-			if v := getNPCAttr(ctx, attacker, key); v > 0 {
-				stabMul = (100.0 + float64(v)) / 100.0
-			} else if v, _ := VarGetValueInt64(attackerCtx, key); v > 0 {
-				stabMul = (100.0 + float64(v)) / 100.0
-			} else {
-				stabMul = 1.5
-			}
-			break
-		}
-	}
+	// 6. STAB 计算
+	stabMul := calculateSTAB(ctx, attacker, atkType)
 	result.StabMul = stabMul
 
-	// ----- 6. 最终治疗量 -----
+	// 7. 最终治疗量
 	finalHeal := baseHeal
 	if stabMul != 1.0 {
 		finalHeal = int64(float64(baseHeal) * stabMul)
+	}
+	if healMod != 1.0 {
+		finalHeal = int64(float64(finalHeal) * healMod)
 	}
 	result.FinalHeal = finalHeal
 

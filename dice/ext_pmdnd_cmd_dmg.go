@@ -178,8 +178,8 @@ var cmdDmg = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		fmt.Fprintf(&calcText, " | 基础: %d*%d*%d*%d%%/(100*%d)=%d",
-			power, result.BattleLv, result.AtkVal, result.RollPct, result.DefVal, result.BaseDmg)
+		fmt.Fprintf(&calcText, " | 基础: %d*%d*%d*%.0f%%/(100*%d)=%d",
+			power, result.BattleLv, result.AtkVal, result.RollPct*100, result.DefVal, result.BaseDmg)
 
 		if result.StabMul != 1.0 || result.TypeMod != 0 {
 			factor := (2.0 + result.TypeMod) / 2.0

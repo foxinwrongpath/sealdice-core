@@ -148,8 +148,8 @@ func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 	if healResult.CritText != "" {
 		fmt.Fprintf(&calcText, " %s", healResult.CritText)
 	}
-	fmt.Fprintf(&calcText, " | 基础: %d*100*%d*%d%%/(100*200)=%d",
-		power, healResult.HealAtkVal, healResult.RollPct, healResult.BaseHeal)
+	fmt.Fprintf(&calcText, " | 基础: %d*100*%d*%.0f%%/(100*200)=%d",
+		power, healResult.HealAtkVal, healResult.RollPct*100, healResult.BaseHeal)
 	if healResult.StabMul != 1.0 {
 		fmt.Fprintf(&calcText, " | STAB x%.2f => %d", healResult.StabMul, healResult.FinalHeal)
 	}
@@ -317,8 +317,8 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 		if !result.Hit {
 			calcText.WriteString(" | 未命中")
 		} else {
-			fmt.Fprintf(&calcText, " | 基础: %d*%d*%d*%d%%/(100*%d)=%d",
-				power, result.BattleLv, result.AtkVal, result.RollPct, result.DefVal, result.BaseDmg)
+			fmt.Fprintf(&calcText, " | 基础: %d*%d*%d*%.0f%%/(100*%d)=%d",
+				power, result.BattleLv, result.AtkVal, result.RollPct*100, result.DefVal, result.BaseDmg)
 			if result.StabMul != 1.0 || result.TypeMod != 0 {
 				factor := (2.0 + result.TypeMod) / 2.0
 				if factor < 0.25 {
@@ -433,15 +433,27 @@ var cmdMove = &CmdItemInfo{
 		".move use <名称>                 非战斗使用（仅消耗PP和环位）\n" +
 		".move pp <名称> +/-N             修改招式PP\n" +
 		".move clr                        清除所有招式\n" +
-		".move <招式名> [@目标] [优势/劣势] [暴击阈值]  使用招式\n" +
-		"  例: .move 喷射火焰 @圈圈熊 优势 19\n" +
-		"  例: .move 治愈波动 @伊布\n" +
-		"  例: .move 剑舞 @自己\n" +
+		"\n" +
+		"⚔️ 使用招式:\n" +
+		"  .move <招式名> [@目标] [优势/劣势] [暴击阈值]\n" +
+		"\n" +
+		"🎯 目标选取规则:\n" +
+		"  · 伤害招式: 不指定目标时自动从先攻列表选取第一个非己单位\n" +
+		"  · 治疗/强化: 不指定目标时默认对自己使用\n" +
+		"  · 可使用 @目标 指定任意目标\n" +
+		"  · 使用 @enemies / @allies / @others / @all 指定群体\n" +
+		"\n" +
+		"📝 示例:\n" +
+		"  .move 喷射火焰 @圈圈熊 优势 19    # 攻击圈圈熊，优势，暴击阈值19\n" +
+		"  .move 治愈波动                    # 默认治疗自己\n" +
+		"  .move 剑舞 @自己                  # 物攻+2强化自己\n" +
+		"  .move 热风 @enemies              # 攻击所有敌人\n" +
+		"  .move 喷射火焰 @圈圈熊 @大嘴蝠    # 攻击多个目标\n" +
 		"\n" +
 		"📋 类别说明:\n" +
 		"  物: 物理攻击  特: 特殊攻击  治疗: 恢复HP  强化: 提升能力\n" +
 		"\n" +
-		"💡 不指定 @目标 时自动从先攻列表选取\n" +
+		"💡 使用 .buff stat 查看当前战斗状态（能力等级、天气、场地等）\n" +
 		"💡 不指定 优势/劣势 时为普通掷骰\n" +
 		"💡 不指定 暴击阈值 时默认为20\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",

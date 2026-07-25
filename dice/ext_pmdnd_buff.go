@@ -26,7 +26,7 @@ type BattleState struct {
 	Protect    int `json:"protect"`
 	Substitute int `json:"substitute"`
 
-	// 天气/场地（剩余回合数）
+	// 天气/场地
 	Weather string `json:"weather"`
 	Terrain string `json:"terrain"`
 }
@@ -72,6 +72,17 @@ func getAbilityModifier(level int) float64 {
 	return abilityLevelModifiers[level]
 }
 
+// clampLevel 限制能力等级在 -6 到 +6 之间
+func clampLevel(v int) int {
+	if v > 6 {
+		return 6
+	}
+	if v < -6 {
+		return -6
+	}
+	return v
+}
+
 // 状态转字符串（用于显示）
 func stateToString(state *BattleState) string {
 	var parts []string
@@ -102,6 +113,13 @@ func stateToString(state *BattleState) string {
 	if state.Substitute > 0 {
 		parts = append(parts, fmt.Sprintf("替身: %d回合", state.Substitute))
 	}
+	// 天气和场地
+	if state.Weather != "" {
+		parts = append(parts, fmt.Sprintf("天气: %s", state.Weather))
+	}
+	if state.Terrain != "" {
+		parts = append(parts, fmt.Sprintf("场地: %s", state.Terrain))
+	}
 	if len(parts) == 0 {
 		return "无特殊状态"
 	}
@@ -126,17 +144,6 @@ func saveBattleState(ctx *MsgContext, state *BattleState) {
 	attrs, _ := ctx.Dice.AttrsManager.LoadByCtx(ctx)
 	data, _ := json.Marshal(state)
 	attrs.Store("$battle_state", ds.NewStrVal(string(data)))
-}
-
-// clampLevel 限制能力等级在 -6 到 +6 之间
-func clampLevel(v int) int {
-	if v > 6 {
-		return 6
-	}
-	if v < -6 {
-		return -6
-	}
-	return v
 }
 
 // ---------- .buff 命令 ----------
