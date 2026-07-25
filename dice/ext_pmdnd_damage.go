@@ -215,16 +215,31 @@ func rollD20(ctx *MsgContext, advantage string, ctLimit int64) (d20 int64, rollP
 // ----- STAB 和克制计算 -----
 
 // calculateSTAB 计算本系加成倍率
+// calculateSTAB 计算本系加成倍率
 func calculateSTAB(ctx *MsgContext, attacker string, atkType string) float64 {
-	attackerCtx := ctx
+	// 判断攻击者是否为 NPC
+	isNPC := false
+	data := loadNPCData(ctx)
+	if _, ok := data[attacker]; ok {
+		isNPC = true
+	}
+
 	atkTypes := []string{}
 	for _, t := range pmdndTypeNames {
 		key := "type_" + t
-		if v := getNPCAttr(ctx, attacker, key); v > 0 {
-			atkTypes = append(atkTypes, t)
-			continue
+		var typeVal int64
+
+		if isNPC {
+			// NPC：只从 NPC 数据读取
+			typeVal = getNPCAttr(ctx, attacker, key)
+		} else {
+			// 玩家：从用户上下文读取
+			if v, _ := VarGetValueInt64(ctx, key); v > 0 {
+				typeVal = v
+			}
 		}
-		if v, _ := VarGetValueInt64(attackerCtx, key); v > 0 {
+
+		if typeVal > 0 {
 			atkTypes = append(atkTypes, t)
 		}
 	}
@@ -233,12 +248,20 @@ func calculateSTAB(ctx *MsgContext, attacker string, atkType string) float64 {
 	for _, t := range atkTypes {
 		if t == atkType {
 			key := "stab_" + t
-			if v := getNPCAttr(ctx, attacker, key); v > 0 {
-				stabMul = (100.0 + float64(v)) / 100.0
-			} else if v, _ := VarGetValueInt64(attackerCtx, key); v > 0 {
-				stabMul = (100.0 + float64(v)) / 100.0
+			var stabVal int64
+
+			if isNPC {
+				stabVal = getNPCAttr(ctx, attacker, key)
 			} else {
-				stabMul = 1.5
+				if v, _ := VarGetValueInt64(ctx, key); v > 0 {
+					stabVal = v
+				}
+			}
+
+			if stabVal > 0 {
+				stabMul = (100.0 + float64(stabVal)) / 100.0
+			} else {
+				stabMul = 1.5 // 默认本系加成
 			}
 			break
 		}
@@ -251,16 +274,29 @@ func calculateTypeModifier(ctx *MsgContext, defender string, atkType string) flo
 	if defender == "" || defender == "目标" {
 		return 0.0
 	}
-	defCtx := ctx
 	typeMod := 0.0
+
+	// 检查防御者是否是 NPC
+	isNPC := false
+	data := loadNPCData(ctx)
+	if _, ok := data[defender]; ok {
+		isNPC = true
+	}
+
 	for _, t := range pmdndTypeNames {
 		key := "type_" + t
 		var typeVal int64
-		if v := getNPCAttr(ctx, defender, key); v > 0 {
-			typeVal = v
-		} else if v, _ := VarGetValueInt64(defCtx, key); v > 0 {
-			typeVal = v
+
+		if isNPC {
+			// NPC：只从 NPC 数据读取，不回退到用户上下文
+			typeVal = getNPCAttr(ctx, defender, key)
+		} else {
+			// 玩家：从用户上下文读取
+			if v, _ := VarGetValueInt64(ctx, key); v > 0 {
+				typeVal = v
+			}
 		}
+
 		if typeVal > 0 {
 			if m, ok := pmdndTypeChart[atkType][t]; ok {
 				typeMod += m * float64(typeVal)
