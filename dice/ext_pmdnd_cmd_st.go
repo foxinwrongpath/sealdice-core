@@ -64,7 +64,11 @@ var cmdSt = getCmdStBase(CmdStOverrideInfo{
 			}
 			vHpBuffVal := hpBuff.MustReadInt()
 			if vHpBuffVal > 0 && i.op == "-" {
-				val := vHpBuffVal - i.value.MustReadInt()
+				delta, ok := i.value.ReadInt()
+				if !ok {
+					return false
+				}
+				val := vHpBuffVal - delta
 				if val >= 0 {
 					attrs.Store("$buff_hp", ds.NewIntVal(val))
 					i.value = ds.NewIntVal(0)

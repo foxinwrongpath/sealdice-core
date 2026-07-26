@@ -97,9 +97,9 @@ func severeNameToParent(severe string) string {
 func hasParentStat(stateName, statName string) bool {
 	mappings := map[string]string{
 		"灼伤": "patk", "严重灼伤": "patk",
-		"冻伤": "patk", "严重冻伤": "patk", // 注：冻伤影响特攻，用 isSpecial 区分
+		"冻伤": "satk", "严重冻伤": "satk",
 		"溶解": "pdef", "严重溶解": "pdef",
-		"破防": "pdef", "严重破防": "pdef", // 注：破防影响特防
+		"破防": "sdef", "严重破防": "sdef",
 	}
 	val, ok := mappings[stateName]
 	return ok && val == statName
@@ -149,50 +149,6 @@ func applyVulnStateModifiers(state *BattleState, atkType string) float64 {
 		mod += 0.5 * float64(layers)
 	}
 	return mod
-}
-
-// applySevereAttackerEffects 应用攻击者的严重状态效果
-func applySevereAttackerEffects(state *BattleState, isSpecial bool, rawAtkVal *int64) {
-	if state == nil {
-		return
-	}
-	for _, os := range state.Ongoing {
-		if os.Rounds <= 0 {
-			continue
-		}
-		switch os.Name {
-		case "严重灼伤":
-			if !isSpecial {
-				*rawAtkVal -= 50
-			}
-		case "严重冻伤":
-			if isSpecial {
-				*rawAtkVal -= 50
-			}
-		}
-	}
-}
-
-// applySevereDefenderEffects 应用防御者的严重状态效果
-func applySevereDefenderEffects(state *BattleState, isSpecial bool, defVal *int64) {
-	if state == nil {
-		return
-	}
-	for _, os := range state.Ongoing {
-		if os.Rounds <= 0 {
-			continue
-		}
-		switch os.Name {
-		case "严重溶解":
-			if !isSpecial {
-				*defVal -= 50
-			}
-		case "严重破防":
-			if isSpecial {
-				*defVal -= 50
-			}
-		}
-	}
 }
 
 // ----- 辅助获取函数 -----
@@ -550,8 +506,8 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	stateAtkLevel := 0
 	stateDefLevel := 0
 	if isSpecial {
-		stateAtkLevel = getStateChangeLevel(attackerState, "patk") // 冻伤→特攻
-		stateDefLevel = getStateChangeLevel(defState, "pdef")      // 破防→特防
+		stateAtkLevel = getStateChangeLevel(attackerState, "satk") // 冻伤→特攻
+		stateDefLevel = getStateChangeLevel(defState, "sdef")      // 破防→特防
 	} else {
 		stateAtkLevel = getStateChangeLevel(attackerState, "patk") // 灼伤→物攻
 		stateDefLevel = getStateChangeLevel(defState, "pdef")      // 溶解→物防
@@ -636,7 +592,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 
 	// 14. 应用结界减伤
-	finalDmg = applyBarrierReduction(state, isSpecial, finalDmg)
+	finalDmg = applyBarrierReduction(defState, isSpecial, finalDmg)
 
 	// 15. 回避减伤：防御者的敏捷调整值直接减免伤害（规则书第271行）
 	evasionDR := getDefenderEvasionDR(ctx, defender)
@@ -670,7 +626,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		totalFactor = damageModifierFactor(typeMod) * stabMul
 	}
 	totalFactor = totalFactor * envMod
-	if (!isSpecial && state.ReflectWall > 0) || (isSpecial && state.LightScreen > 0) {
+	if (!isSpecial && defState.ReflectWall > 0) || (isSpecial && defState.LightScreen > 0) {
 		totalFactor = totalFactor / 2
 	}
 	result.EffectText = determineEffectText(finalDmg, rollPct, totalFactor, defender)

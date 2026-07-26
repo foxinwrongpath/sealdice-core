@@ -195,12 +195,11 @@ var cmdInit = &CmdItemInfo{
 				}
 			}
 
-			// 如果不跳过 tick，则先结算状态
+			tickText := ""
 			if !noTick {
-				// 调用 .buff tick 的逻辑
 				tickResults := executeBuffTick(ctx)
 				if tickResults != "" {
-					ReplyToSender(ctx, msg, "⏱️ 回合结束，状态结算:\n"+tickResults)
+					tickText = "\n⏱️ 回合结束，状态结算:\n" + tickResults
 				}
 			}
 
@@ -213,7 +212,7 @@ var cmdInit = &CmdItemInfo{
 			}
 			round = (round + 1) % int64(len(lst))
 			setInitNextRoundVars(ctx, lst, round)
-			ReplyToSender(ctx, msg, DiceFormatTmpl(ctx, "DND:先攻_下一回合"))
+			ReplyToSender(ctx, msg, DiceFormatTmpl(ctx, "DND:先攻_下一回合")+tickText)
 
 		case "clr", "clear":
 			// 1. 清空先攻列表

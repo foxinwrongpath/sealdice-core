@@ -76,14 +76,14 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 var cmdRestAliasLong = &CmdItemInfo{
 	Name: "长休",
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
-		cmdArgs.Args = []string{"rest", "long"}
+		cmdArgs.Args = []string{"long"}
 		return cmdRest.Solve(ctx, msg, cmdArgs)
 	},
 }
 var cmdRestAliasShort = &CmdItemInfo{
 	Name: "短休",
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
-		cmdArgs.Args = []string{"rest", "short"}
+		cmdArgs.Args = []string{"short"}
 		return cmdRest.Solve(ctx, msg, cmdArgs)
 	},
 }
