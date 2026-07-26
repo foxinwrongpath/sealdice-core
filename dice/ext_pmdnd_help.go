@@ -18,7 +18,6 @@ func getPmdndHelp() string {
 		".rest    休息（长休/短休，恢复HP和PP）\n" +
 		".dmg     伤害计算（PMDnD完整公式）\n" +
 		".move    招式管理（添加/删除/使用招式）\n" +
-		".stab    STAB本系加成查询\n" +
 		".type    属性克制查询（22种类型）\n" +
 		".crit    暴击判定（可设阈值）\n" +
 		".buff    战斗状态（能力等级/结界/护盾）\n" +
@@ -27,12 +26,11 @@ func getPmdndHelp() string {
 		".pmode   全局输出模式（detail/debug/off）\n" +
 		".npc     NPC管理（创建/属性/招式/攻击）\n" +
 		".init    先攻列表管理\n" +
-		".action  行动资源（行动力/附加行动/反应）\n" +
 		".pmdnd   制卡（4d6k3 自由分配模式）\n" +
 		".pmdndx  制卡（4d6k3 预设属性模式）\n" +
 		"────────────────────────────────────────\n" +
 		"⬆ 以上命令均可输入 .<命令> help 查看详细用法\n" +
-		"⬆ 常用别名：.属性=.st  .环位=.ring  .长休/.短休=.rest  .行动=.action"
+		"⬆ 常用别名：.属性=.st  .环位=.ring  .长休/.短休=.rest  .暴击=.crit"
 }
 
 func getPmdndShortHelp() string {
@@ -224,22 +222,6 @@ func getPmodeHelp() string {
 		"\n" +
 		"💡 全局模式影响 .move / .dmg / .npc 的输出\n" +
 		"💡 命令内指定 detail/debug 始终优先于全局设置\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-}
-
-// ---------- STAB 本系加成 ----------
-
-func getStabHelp() string {
-	return "PMDnD 本系加成(.stab):\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		".stab <招式类型>          查询该招式是否为本系\n" +
-		".stab <招式类型> @某人    查询他人的STAB\n" +
-		".stab list                列出自身属性类型\n" +
-		"\n" +
-		"📋 说明:\n" +
-		"  本系加成(STAB) = 1.5x 伤害倍率\n" +
-		"  可通过 .st stab_火:50 自定义倍率\n" +
-		"  自动读取属性类型: .st type_火:1  type_格斗:2\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 

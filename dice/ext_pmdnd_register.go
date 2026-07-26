@@ -21,11 +21,9 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 			"rest":    cmdRest,
 			"move":    cmdMove,
 			"dmg":     cmdDmg,
-			"stab":    cmdStab,
 			"type":    cmdType,
 			"crit":    cmdCrit,
 			"init":    cmdInit,
-			"action":  cmdAction,
 			"npc":     cmdNPC,
 			"ds":      cmdDs,
 			"buff":    cmdBuff,
@@ -39,7 +37,6 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 			"长休":   cmdRestAliasLong,
 			"短休":   cmdRestAliasShort,
 			"暴击":   cmdCrit,
-			"行动":   cmdAction,
 			"死亡豁免": cmdDs,
 
 			// 旧指令保留以兼容
@@ -52,12 +49,10 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 			"shortrest": cmdRest,
 			"ri":        cmdInit,
 			"drc":       cmdRc,
-			"dstab":     cmdStab,
 			"dtype":     cmdType,
 			"dcrit":     cmdCrit,
 			"ddmg":      cmdDmg,
 			"dmove":     cmdMove,
-			"daction":   cmdAction,
 		},
 	}
 	self.RegisterExtension(theExt)

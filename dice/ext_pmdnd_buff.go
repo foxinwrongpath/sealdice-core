@@ -15,6 +15,7 @@ var CumulativeStateNames = []string{
 	"麻痹", "瞌睡", "困惑", "畏缩", "恍惚",
 	"迷离", "腐蚀", "信息素", "看破", "共振",
 	"诅咒", "祝福", "流血",
+	"潮湿", "干燥", "寒冷", "炎热",
 }
 
 var SevereStateMap = map[string]string{
@@ -33,6 +34,8 @@ var SevereStateMap = map[string]string{
 	"信息素": "锁定",
 	"看破":  "超会心",
 	"共振":  "震荡",
+	"寒冷":  "冻结",
+	"炎热":  "融化",
 }
 
 type StateEffect struct {
@@ -42,13 +45,46 @@ type StateEffect struct {
 }
 
 var StateEffects = map[string]StateEffect{
-	"灼伤": {DamagePerLayer: 25, StatMod: "物攻:-25", Desc: "每层-25物攻，回合结束造成25伤害"},
-	"冻伤": {DamagePerLayer: 25, StatMod: "特攻:-25", Desc: "每层-25特攻，回合结束造成25伤害"},
-	"中毒": {DamagePerLayer: 50, StatMod: "", Desc: "每层回合结束造成50伤害"},
-	"溶解": {DamagePerLayer: 25, StatMod: "物防:-25", Desc: "每层-25物防，回合结束造成25伤害"},
-	"破防": {DamagePerLayer: 25, StatMod: "特防:-25", Desc: "每层-25特防，回合结束造成25伤害"},
-	"麻痹": {DamagePerLayer: 0, StatMod: "回避:-2", Desc: "每层回避-2，20层转为完全麻痹"},
-	"瞌睡": {DamagePerLayer: 0, StatMod: "命中:-2", Desc: "每层命中-2，20层转为睡眠"},
+	"灼伤": {DamagePerLayer: 25, StatMod: "物攻", Desc: "物攻变化等级-25，回合结束受25威力火属性伤害/层"},
+	"冻伤": {DamagePerLayer: 25, StatMod: "特攻", Desc: "特攻变化等级-25，回合结束受25威力冰属性伤害/层"},
+	"中毒": {DamagePerLayer: 50, StatMod: "", Desc: "回合结束受50威力毒属性伤害/层"},
+	"溶解": {DamagePerLayer: 25, StatMod: "物防", Desc: "物防变化等级-25，回合结束受25威力酸属性伤害/层"},
+	"破防": {DamagePerLayer: 25, StatMod: "特防", Desc: "特防变化等级-25，回合结束受25威力超能力属性伤害/层"},
+	"麻痹": {DamagePerLayer: 0, StatMod: "回避", Desc: "回避-2，20层转为完全麻痹"},
+	"瞌睡": {DamagePerLayer: 0, StatMod: "命中", Desc: "命中-2，20层转为睡眠"},
+	"诅咒": {DamagePerLayer: 25, StatMod: "", Desc: "光耀/黯蚀+0.5易伤，回合结束受25威力黯蚀伤害/层"},
+}
+
+// StateChangeLevels 累积型状态对应的变化等级（固定值，不分层数）
+// 严重状态覆盖普通状态的效果
+var StateChangeLevels = map[string]int{
+	"灼伤":  -25,
+	"冻伤":  -25,
+	"溶解":  -25,
+	"破防":  -25,
+	"严重灼伤": -50,
+	"严重冻伤": -50,
+	"严重溶解": -50,
+	"严重破防": -50,
+}
+
+// VulnStateTypeMods 易伤类状态对应的属性伤害修正（每层）
+// 正值=易伤(受伤更多), 负值=抗性(受伤更少)
+var VulnStateTypeMods = map[string]map[string]float64{
+	"潮湿":  {"火": -0.5, "冰": 0.5, "电": 0.5},
+	"干燥":  {"水": -0.5, "火": 0.5, "地面": 0.5, "岩石": 0.5},
+	"寒冷":  {"火": -0.5, "水": 0.5, "冰": 0.5, "飞行": 0.5},
+	"炎热":  {"冰": -0.5, "火": 0.5},
+	"困惑":  {"超能力": 0.5},
+	"畏缩":  {"龙": 0.5},
+	"恍惚":  {"恶": 0.5, "幽灵": 0.5},
+	"迷离":  {"妖精": 0.5},
+	"腐蚀":  {"毒": 0.5, "酸": 0.5},
+	"信息素": {"虫": 0.5},
+	"看破":  {"一般": 0.5, "格斗": 0.5},
+	"共振":  {"钢": 0.5, "力场": 0.5},
+	"诅咒":  {"光耀": 0.5, "黯蚀": 0.5},
+	"祝福":  {"光耀": -0.5, "黯蚀": -0.5},
 }
 
 // ---------- 状态数据结构 ----------
@@ -324,26 +360,27 @@ func executeBuffTick(ctx *MsgContext) string {
 	return strings.Join(results, "\n")
 }
 
+// getAbilityModifier 根据 PMDnD 规则书变化等级公式计算倍率
+// x > 0: (100 + x) / 100, x ≤ 0: 100 / (100 - x)
 func getAbilityModifier(level int) float64 {
-	modifiers := map[int]float64{
-		-6: 0.4, -5: 0.5, -4: 0.6, -3: 0.7, -2: 0.8, -1: 0.9,
-		0: 1.0, 1: 1.1, 2: 1.2, 3: 1.3, 4: 1.4, 5: 1.5, 6: 1.6,
+	if level > 70 {
+		level = 70
 	}
-	if level < -6 {
-		level = -6
+	if level < -70 {
+		level = -70
 	}
-	if level > 6 {
-		level = 6
+	if level > 0 {
+		return float64(100+level) / 100.0
 	}
-	return modifiers[level]
+	return 100.0 / float64(100-level)
 }
 
 func clampLevel(v int) int {
-	if v > 6 {
-		return 6
+	if v > 70 {
+		return 70
 	}
-	if v < -6 {
-		return -6
+	if v < -70 {
+		return -70
 	}
 	return v
 }

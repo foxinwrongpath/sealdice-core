@@ -43,77 +43,153 @@ type HealResult struct {
 
 // ----- 状态修正辅助函数 -----
 
-// applyCumulativeStateModifiers 应用防御者的累积型状态修正
-func applyCumulativeStateModifiers(defState *BattleState, isSpecial bool, rawAtkVal *int64, defVal *int64, hitPenalty *int) {
-	if defState == nil {
-		return
+// getStateChangeLevel 计算状态带来的变化等级（固定值，不分层数）
+// 严重状态覆盖普通状态的效果
+func getStateChangeLevel(state *BattleState, statName string) int {
+	if state == nil {
+		return 0
 	}
+	level := 0
+	hasSevere := map[string]bool{}
 
-	// 灼伤：物攻 -25（仅物理攻击）
-	if layers, ok := defState.Cumulative["灼伤"]; ok && layers > 0 && !isSpecial {
-		*rawAtkVal -= int64(layers) * 25 / 20 // 每层 -1.25，取整
-	}
-	// 冻伤：特攻 -25（仅特殊攻击）
-	if layers, ok := defState.Cumulative["冻伤"]; ok && layers > 0 && isSpecial {
-		*rawAtkVal -= int64(layers) * 25 / 20
-	}
-	// 溶解：物防 -25
-	if layers, ok := defState.Cumulative["溶解"]; ok && layers > 0 && !isSpecial {
-		*defVal -= int64(layers) * 25 / 20
-	}
-	// 破防：特防 -25
-	if layers, ok := defState.Cumulative["破防"]; ok && layers > 0 && isSpecial {
-		*defVal -= int64(layers) * 25 / 20
-	}
-	// 麻痹：回避 -2（影响最终伤害减免）
-	if layers, ok := defState.Cumulative["麻痹"]; ok && layers > 0 {
-		// 麻痹每层 -0.1 回避，最高 -2
-		*hitPenalty -= int(layers / 10)
-		if *hitPenalty < -2 {
-			*hitPenalty = -2
+	// 先检查严重状态
+	for severeName, effectVal := range StateChangeLevels {
+		if !hasParentStat(severeName, statName) {
+			continue
+		}
+		for _, os := range state.Ongoing {
+			if os.Name == severeName && os.Rounds > 0 {
+				hasSevere[severeNameToParent(severeName)] = true
+				level += effectVal
+			}
 		}
 	}
-	// 瞌睡：命中 -2（影响攻击掷骰）
-	// 注意：瞌睡影响攻击方，但我们这里只处理防御者状态
-	// 攻击者的瞌睡应该在调用 calculateDamage 之前由调用者处理
+
+	// 再检查普通累积型状态（被严重状态覆盖时跳过）
+	for _, cumName := range CumulativeStateNames {
+		if !hasParentStat(cumName, statName) {
+			continue
+		}
+		if hasSevere[cumName] {
+			continue
+		}
+		if layers := state.Cumulative[cumName]; layers > 0 {
+			if effectVal, ok := StateChangeLevels[cumName]; ok {
+				level += effectVal
+			}
+		}
+	}
+	return level
 }
 
-// applySevereStateEffects 应用防御者的严重状态效果
-func applySevereStateEffects(defState *BattleState, isSpecial bool, rawAtkVal *int64, defVal *int64) {
+// severeNameToParent 严重状态 → 普通状态名
+func severeNameToParent(severe string) string {
+	switch severe {
+	case "严重灼伤": return "灼伤"
+	case "严重冻伤": return "冻伤"
+	case "严重溶解": return "溶解"
+	case "严重破防": return "破防"
+	default: return severe
+	}
+}
+
+// hasParentStat 检查状态名是否影响指定属性
+func hasParentStat(stateName, statName string) bool {
+	mappings := map[string]string{
+		"灼伤": "patk", "严重灼伤": "patk",
+		"冻伤": "patk", "严重冻伤": "patk", // 注：冻伤影响特攻，用 isSpecial 区分
+		"溶解": "pdef", "严重溶解": "pdef",
+		"破防": "pdef", "严重破防": "pdef", // 注：破防影响特防
+	}
+	val, ok := mappings[stateName]
+	return ok && val == statName
+}
+
+// applyAttackerStateModifiers 攻击者自身累积型状态修正（命中/回避影响）
+func applyAttackerStateModifiers(attackerState *BattleState, hitPenalty *int) {
+	if attackerState == nil {
+		return
+	}
+	// 瞌睡：命中 -2
+	if layers, ok := attackerState.Cumulative["瞌睡"]; ok && layers > 0 {
+		*hitPenalty -= 2
+	}
+	// 麻痹：自身命中 -2（规则书：麻痹影响回避，不影响攻击方命中）
+	// 但麻痹攻击者攻击时自身也会受影响——规则书只说"回避 -2"，这是防御属性
+}
+
+// applyDefenderStateModifiers 防御者累积型状态修正
+func applyDefenderStateModifiers(defState *BattleState, hitPenalty *int) {
 	if defState == nil {
 		return
 	}
-
-	// 检查是否有任何严重状态
-	severeStates := map[string]string{
-		"严重灼伤": "物攻",
-		"严重冻伤": "特攻",
-		"严重溶解": "物防",
-		"严重破防": "特防",
+	// 麻痹：回避 -2（防御者麻痹→更难被命中）
+	if layers, ok := defState.Cumulative["麻痹"]; ok && layers > 0 {
+		*hitPenalty -= 2
 	}
+}
 
-	for severeName, target := range severeStates {
-		// 检查持续型状态中是否有严重状态（严重状态作为持续型状态存储）
-		for _, os := range defState.Ongoing {
-			if os.Name == severeName && os.Rounds > 0 {
-				switch target {
-				case "物攻":
-					if !isSpecial {
-						*rawAtkVal -= 50
-					}
-				case "特攻":
-					if isSpecial {
-						*rawAtkVal -= 50
-					}
-				case "物防":
-					if !isSpecial {
-						*defVal -= 50
-					}
-				case "特防":
-					if isSpecial {
-						*defVal -= 50
-					}
-				}
+// applyVulnStateModifiers 应用易伤类状态的属性伤害修正
+func applyVulnStateModifiers(state *BattleState, atkType string) float64 {
+	if state == nil {
+		return 0
+	}
+	mod := 0.0
+	for stateName, typeMods := range VulnStateTypeMods {
+		layers := state.Cumulative[stateName]
+		if layers <= 0 {
+			continue
+		}
+		if val, ok := typeMods[atkType]; ok {
+			mod += val * float64(layers)
+		}
+	}
+	// 流血：被攻击时伤害修正 +0.5/层
+	if layers, ok := state.Cumulative["流血"]; ok && layers > 0 {
+		mod += 0.5 * float64(layers)
+	}
+	return mod
+}
+
+// applySevereAttackerEffects 应用攻击者的严重状态效果
+func applySevereAttackerEffects(state *BattleState, isSpecial bool, rawAtkVal *int64) {
+	if state == nil {
+		return
+	}
+	for _, os := range state.Ongoing {
+		if os.Rounds <= 0 {
+			continue
+		}
+		switch os.Name {
+		case "严重灼伤":
+			if !isSpecial {
+				*rawAtkVal -= 50
+			}
+		case "严重冻伤":
+			if isSpecial {
+				*rawAtkVal -= 50
+			}
+		}
+	}
+}
+
+// applySevereDefenderEffects 应用防御者的严重状态效果
+func applySevereDefenderEffects(state *BattleState, isSpecial bool, defVal *int64) {
+	if state == nil {
+		return
+	}
+	for _, os := range state.Ongoing {
+		if os.Rounds <= 0 {
+			continue
+		}
+		switch os.Name {
+		case "严重溶解":
+			if !isSpecial {
+				*defVal -= 50
+			}
+		case "严重破防":
+			if isSpecial {
+				*defVal -= 50
 			}
 		}
 	}
@@ -454,26 +530,46 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	battleLv := getBattleLevel(ctx, attacker)
 	result.BattleLv = battleLv
 
-	// 2. 加载防御者的战斗状态（用于状态修正）
+	// 2. 加载双方战斗状态
+	attackerState := loadBattleStateFor(ctx, attacker)
 	defState := loadBattleStateFor(ctx, defender)
 
-	// 3. 应用防御者的累积型状态修正（灼伤/冻伤/溶解/破防/麻痹）
+	// 3. 命中/回避修正（瞌睡→命中-, 麻痹→回避-）
 	hitPenalty := 0
-	applyCumulativeStateModifiers(defState, isSpecial, &rawAtkVal, &defVal, &hitPenalty)
+	applyAttackerStateModifiers(attackerState, &hitPenalty)
+	applyDefenderStateModifiers(defState, &hitPenalty)
 
-	// 4. 应用防御者的严重状态修正
-	applySevereStateEffects(defState, isSpecial, &rawAtkVal, &defVal)
+	// 4. 状态变化等级（灼伤/冻伤/溶解/破防的固定变化等级，严重版本覆盖普通版本）
+	stateAtkLevel := 0
+	stateDefLevel := 0
+	if isSpecial {
+		stateAtkLevel = getStateChangeLevel(attackerState, "patk") // 冻伤→特攻
+		stateDefLevel = getStateChangeLevel(defState, "pdef")      // 破防→特防
+	} else {
+		stateAtkLevel = getStateChangeLevel(attackerState, "patk") // 灼伤→物攻
+		stateDefLevel = getStateChangeLevel(defState, "pdef")      // 溶解→物防
+	}
 
 	// 5. 确保防御值不低于最小值
 	if defVal < 1 {
 		defVal = 1
 	}
+
+	// 6. 应用防御者状态变化等级到防御值
+	defChangeLevel := stateDefLevel
+	if isSpecial {
+		defChangeLevel = getStateChangeLevel(defState, "pdef") // 破防系列→特防
+	} else {
+		defChangeLevel = getStateChangeLevel(defState, "pdef") // 溶解系列→物防
+	}
+	defVal = int64(float64(defVal) * getAbilityModifier(defChangeLevel))
+	if defVal < 1 {
+		defVal = 1
+	}
 	result.DefVal = defVal
 
-	// 6. 加载攻击者状态（用于天气/场地/能力等级）
-	state := loadBattleState(ctx)
-
 	// 7. 应用天气和场地修正到攻击值
+	state := attackerState
 	weatherMod := applyWeatherModifier(atkType, state)
 	terrainMod := applyTerrainModifier(atkType, state)
 	envMod := weatherMod * terrainMod
@@ -482,20 +578,20 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		adjustedRawAtkVal = 1
 	}
 
-	// 8. 应用能力等级修正
-	atkVal := applyAbilityModifier(state, isSpecial, adjustedRawAtkVal)
+	// 8. 合并状态变化等级 + buff 变化等级，应用能力修正
+	totalAtkLevel := stateAtkLevel
+	if isSpecial {
+		totalAtkLevel += state.SpAttackLevel
+	} else {
+		totalAtkLevel += state.AttackLevel
+	}
+	atkVal := int64(float64(adjustedRawAtkVal) * getAbilityModifier(totalAtkLevel))
+	if atkVal < 1 {
+		atkVal = 1
+	}
 	result.AtkVal = atkVal
 
-	// 9. 检查攻击者自身的瞌睡状态（命中-2）
-	attackerState := loadBattleStateFor(ctx, attacker)
-	if v, ok := attackerState.Cumulative["瞌睡"]; ok && v > 0 {
-		hitPenalty -= int(v / 10)
-		if hitPenalty < -2 {
-			hitPenalty = -2
-		}
-	}
-
-	// 10. 掷骰（传入 attackBonus）
+	// 9. 掷骰（传入 attackBonus + hitPenalty）
 	d20, attackRoll, rollPct, critText := rollD20(ctx, advantage, ctLimit, attackBonus, hitPenalty)
 	if strings.HasPrefix(critText, "骰点") {
 		return result, critText
@@ -517,10 +613,12 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 	result.BaseDmg = totalDmg
 
-	// 12. STAB 和克制
+	// 12. STAB 和克制 + 易伤类状态修正
 	stabMul := calculateSTAB(ctx, attacker, atkType)
 	result.StabMul = stabMul
 	typeMod := calculateTypeModifier(ctx, defender, atkType)
+	vulnMod := applyVulnStateModifiers(defState, atkType)
+	typeMod += vulnMod
 	result.TypeMod = typeMod
 
 	// 13. 应用 STAB 和克制
@@ -536,6 +634,16 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 
 	// 14. 应用结界减伤
 	finalDmg = applyBarrierReduction(state, isSpecial, finalDmg)
+
+	// 15. 防御者保护/替身
+	if defState.Protect > 0 {
+		finalDmg = 0
+		result.EffectText = defender + " 被保护了！"
+	}
+	if finalDmg > 0 && defState.Substitute > 0 {
+		result.EffectText = "替身承受了伤害！"
+	}
+
 	result.FinalDmg = finalDmg
 
 	// 15. 填充结果字段

@@ -424,82 +424,44 @@ func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 }
 
 // ---------- executeBuffMove ----------
+// 状态/强化招式：仅显示招式效果提醒，不做自动写入。
+// 状态的实际命中、层数、是否免疫等由 DM 裁决后通过 .buff add / .buff set 手工应用。
+// 机器职责：数值计算（伤害公式含状态修正自动生效）。DM 职责：裁决 and 叙事。
 func executeBuffMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, effectsRaw string, remainingPP int64, detailMode bool, debugMode bool) CmdExecuteResult {
+	playerName := getPlayerNameTempFunc(mctx)
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("💪 %s 使用了 %s！", playerName, name))
+
 	if effectsRaw != "" {
-		state := loadBattleStateFor(ctx, mctx.Player.Name)
 		effectList := strings.Split(effectsRaw, ",")
-		applied := false
+		var cleanEffects []string
 		for _, eff := range effectList {
 			eff = strings.TrimSpace(eff)
-			if eff == "" {
-				continue
-			}
-			parts := strings.SplitN(eff, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			attr := strings.TrimSpace(parts[0])
-			valStr := strings.TrimSpace(parts[1])
-			val, err := strconv.Atoi(valStr)
-			if err != nil {
-				continue
-			}
-			switch attr {
-			case "物攻", "attack":
-				state.AttackLevel = clampLevel(state.AttackLevel + val)
-				applied = true
-			case "物防", "defense":
-				state.DefenseLevel = clampLevel(state.DefenseLevel + val)
-				applied = true
-			case "特攻", "spattack":
-				state.SpAttackLevel = clampLevel(state.SpAttackLevel + val)
-				applied = true
-			case "特防", "spdefense":
-				state.SpDefenseLevel = clampLevel(state.SpDefenseLevel + val)
-				applied = true
-			case "速度", "speed":
-				state.SpeedLevel = clampLevel(state.SpeedLevel + val)
-				applied = true
-			case "反射壁", "reflect":
-				state.ReflectWall = val
-				if state.ReflectWall < 0 {
-					state.ReflectWall = 0
-				}
-				applied = true
-			case "光墙", "lightscreen":
-				state.LightScreen = val
-				if state.LightScreen < 0 {
-					state.LightScreen = 0
-				}
-				applied = true
-			case "保护", "protect":
-				state.Protect = val
-				if state.Protect < 0 {
-					state.Protect = 0
-				}
-				applied = true
-			case "替身", "substitute":
-				state.Substitute = val
-				if state.Substitute < 0 {
-					state.Substitute = 0
-				}
-				applied = true
+			if eff != "" {
+				cleanEffects = append(cleanEffects, eff)
 			}
 		}
-		if !applied {
-			state.AttackLevel = clampLevel(state.AttackLevel + 1)
+		if len(cleanEffects) > 0 {
+			lines = append(lines, fmt.Sprintf("  📋 招式效果: %s", strings.Join(cleanEffects, " / ")))
+			lines = append(lines, fmt.Sprintf("  💡 请 DM 根据命中情况使用以下命令手工应用:"))
+			for _, eff := range cleanEffects {
+				if strings.Contains(eff, ":") {
+					parts := strings.SplitN(eff, ":", 2)
+					attr := strings.TrimSpace(parts[0])
+					val := strings.TrimSpace(parts[1])
+					lines = append(lines, fmt.Sprintf("     .buff set %s %s    (能力等级)", attr, val))
+				} else {
+					lines = append(lines, fmt.Sprintf("     .buff add <目标> %s <层数>    (状态)", eff))
+				}
+			}
 		}
-		saveBattleStateFor(ctx, mctx.Player.Name, state)
 	} else {
-		state := loadBattleStateFor(ctx, mctx.Player.Name)
-		state.AttackLevel = clampLevel(state.AttackLevel + 1)
-		saveBattleStateFor(ctx, mctx.Player.Name, state)
+		lines = append(lines, "  💡 该招式未存储效果描述，请 DM 根据规则手工裁决")
+		lines = append(lines, "     状态应用: .buff add <目标> <状态名> <层数>")
+		lines = append(lines, "     能力等级: .buff set <名称> <值>")
 	}
 
-	state := loadBattleStateFor(ctx, mctx.Player.Name)
-	var lines []string
-	lines = append(lines, fmt.Sprintf("💪 %s 使用了 %s！", getPlayerNameTempFunc(mctx), name))
-	lines = append(lines, fmt.Sprintf("  %s", stateToString(state)))
 	if debugMode || detailMode {
 		lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
 	}
