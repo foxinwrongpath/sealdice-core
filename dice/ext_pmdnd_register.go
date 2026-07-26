@@ -12,7 +12,7 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 		},
 		GetDescText: GetExtensionDesc,
 		CmdMap: CmdMapCls{
-			// 核心命令（标准化）
+			// 核心命令（英文）
 			"pmdnd":   cmdPmdnd,
 			"pmdndx":  cmdPmdnd,
 			"st":      cmdSt,
@@ -32,15 +32,28 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 			"terrain": cmdTerrain,
 			"pmode":   cmdPmode,
 
-			// 中文别名（保留方便习惯）
+			// 中文别名
 			"属性":   cmdSt,
+			"检定":   cmdRc,
 			"环位":   cmdRing,
+			"休息":   cmdRest,
+			"招式":   cmdMove,
+			"伤害":   cmdDmg,
+			"克制":   cmdType,
+			"暴击":   cmdCrit,
+			"先攻":   cmdInit,
+			"敌人":   cmdNPC,
+			"濒死":   cmdDs,
+			"死亡豁免": cmdDs,
+			"状态":   cmdBuff,
+			"天气":   cmdWeather,
+			"场地":   cmdTerrain,
+			"模式":   cmdPmode,
+			"制卡":   cmdPmdnd,
 			"长休":   cmdRestAliasLong,
 			"短休":   cmdRestAliasShort,
-			"暴击":   cmdCrit,
-			"死亡豁免": cmdDs,
 
-			// 旧指令保留以兼容
+			// 旧指令兼容
 			"dst":       cmdSt,
 			"ra":        cmdRc,
 			"rah":       cmdRc,

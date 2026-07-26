@@ -197,69 +197,63 @@ func applySevereDefenderEffects(state *BattleState, isSpecial bool, defVal *int6
 
 // ----- 辅助获取函数 -----
 
-// getAttackValue 获取攻击者的原始攻击值（未应用能力等级修正）
-func getAttackValue(ctx *MsgContext, attacker string, isSpecial bool) int64 {
-	attackerCtx := ctx
-	val := int64(10)
-	if !isSpecial {
-		val = getNPCAttr(ctx, attacker, "patk")
-		if val == 0 {
-			if v, _ := VarGetValueInt64(attackerCtx, "patk"); v != 0 {
-				val = v
-			} else {
-				val = 10
+// getAttrValue 统一读取属性值（玩家或NPC），支持多 key fallback
+// 对于玩家：按 keys 顺序尝试 VarGetValueInt64，返回第一个非零值
+// 对于NPC：按 keys 顺序尝试 getNPCAttr，返回第一个非零值
+func getAttrValue(ctx *MsgContext, target string, keys ...string) int64 {
+	isNPC := false
+	if target != ctx.Player.Name {
+		data := loadNPCData(ctx)
+		_, isNPC = data[target]
+	}
+	for _, key := range keys {
+		if isNPC {
+			if v := getNPCAttr(ctx, target, key); v > 0 {
+				return v
 			}
-		}
-	} else {
-		val = getNPCAttr(ctx, attacker, "satk")
-		if val == 0 {
-			if v, _ := VarGetValueInt64(attackerCtx, "satk"); v != 0 {
-				val = v
-			} else {
-				val = 10
+		} else {
+			if v, _ := VarGetValueInt64(ctx, key); v > 0 {
+				return v
 			}
 		}
 	}
-	return val
+	return 0
+}
+
+// getAttackValue 获取攻击者的原始攻击值（未应用能力等级修正）
+func getAttackValue(ctx *MsgContext, attacker string, isSpecial bool) int64 {
+	if !isSpecial {
+		if v := getAttrValue(ctx, attacker, "patk", "物攻", "物理攻击"); v > 0 {
+			return v
+		}
+	} else {
+		if v := getAttrValue(ctx, attacker, "satk", "特攻", "特殊攻击"); v > 0 {
+			return v
+		}
+	}
+	return 10
 }
 
 // getDefenseValue 获取防御者的防御值
 func getDefenseValue(ctx *MsgContext, defender string, isSpecial bool) int64 {
-	defCtx := ctx
-	val := int64(10)
 	if !isSpecial {
-		val = getNPCAttr(ctx, defender, "pdef")
-		if val == 0 {
-			if v, _ := VarGetValueInt64(defCtx, "pdef"); v != 0 {
-				val = v
-			} else {
-				val = 10
-			}
+		if v := getAttrValue(ctx, defender, "pdef", "物防", "物理防御"); v > 0 {
+			return v
 		}
 	} else {
-		val = getNPCAttr(ctx, defender, "sdef")
-		if val == 0 {
-			if v, _ := VarGetValueInt64(defCtx, "sdef"); v != 0 {
-				val = v
-			} else {
-				val = 10
-			}
+		if v := getAttrValue(ctx, defender, "sdef", "特防", "特殊防御"); v > 0 {
+			return v
 		}
 	}
-	return val
+	return 10
 }
 
-// getBattleLevel 获取攻击者的战斗等级
+// getBattleLevel 获取攻击者的挑战等级
 func getBattleLevel(ctx *MsgContext, attacker string) int64 {
-	attackerCtx := ctx
-	// 默认30（PMDnD初始CR）
-	level := int64(30)
-	if v := getNPCAttr(ctx, attacker, "cr"); v > 0 {
-		level = v
-	} else if v, _ := VarGetValueInt64(attackerCtx, "战斗等级"); v != 0 {
-		level = v
+	if v := getAttrValue(ctx, attacker, "挑战等级", "cr", "战斗等级"); v > 0 {
+		return v
 	}
-	return level
+	return 30
 }
 
 // applyAbilityModifier 应用能力等级修正到攻击值
@@ -492,6 +486,19 @@ func applyBarrierReduction(state *BattleState, isSpecial bool, damage int64) int
 	return damage
 }
 
+// damageModifierFactor 计算伤害修正倍率（规则书公式）
+// x ≥ 0: (2 + x) / 2,  x < 0: 2 / (2 - x)
+func damageModifierFactor(mod float64) float64 {
+	if mod >= 0 {
+		return (2.0 + mod) / 2.0
+	}
+	f := 2.0 / (2.0 - mod)
+	if f < 0.25 {
+		f = 0.25
+	}
+	return f
+}
+
 // determineEffectText 判定效果文本
 func determineEffectText(finalDmg int64, rollPct float64, totalFactor float64, defender string) string {
 	if finalDmg == 0 && rollPct > 0 {
@@ -624,11 +631,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	// 13. 应用 STAB 和克制
 	finalDmg := totalDmg
 	if typeMod != 0 || stabMul != 1.0 {
-		factor := (2.0 + typeMod) / 2.0
-		if factor < 0.25 {
-			factor = 0.25
-		}
-		factor *= stabMul
+		factor := damageModifierFactor(typeMod) * stabMul
 		finalDmg = int64(float64(totalDmg) * factor)
 	}
 
@@ -664,11 +667,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	// 16. 效果文本
 	totalFactor := 1.0
 	if typeMod != 0 || stabMul != 1.0 {
-		factor := (2.0 + typeMod) / 2.0
-		if factor < 0.25 {
-			factor = 0.25
-		}
-		totalFactor = factor * stabMul
+		totalFactor = damageModifierFactor(typeMod) * stabMul
 	}
 	totalFactor = totalFactor * envMod
 	if (!isSpecial && state.ReflectWall > 0) || (isSpecial && state.LightScreen > 0) {
@@ -682,17 +681,13 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 // ----- 治疗计算函数 -----
 
 // calculateHeal 计算治疗量
-func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage string, ctLimit int64, attacker string, defender string) (HealResult, string) {
+func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage string, ctLimit int64, attacker string, defender string, attackBonus int64) (HealResult, string) {
 	var result HealResult
 
 	// 1. 获取治疗攻击值（特防）
-	healAtkVal := getNPCAttr(ctx, attacker, "sdef")
+	healAtkVal := getAttrValue(ctx, attacker, "sdef", "特防", "特殊防御")
 	if healAtkVal == 0 {
-		if v, _ := VarGetValueInt64(ctx, "sdef"); v != 0 {
-			healAtkVal = v
-		} else {
-			healAtkVal = 10
-		}
+		healAtkVal = 10
 	}
 	result.HealAtkVal = healAtkVal
 
@@ -707,8 +702,8 @@ func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage strin
 		healMod = 1.3
 	}
 
-	// 4. 治疗掷骰（治疗不受攻击加值影响，attackBonus=0）
-	d20, _, rollPct, critText := rollD20(ctx, advantage, ctLimit, 0, 0)
+	// 4. 治疗掷骰（规则书：治疗掷骰享受所有攻击掷骰加值）
+	d20, _, rollPct, critText := rollD20(ctx, advantage, ctLimit, attackBonus, 0)
 	if strings.HasPrefix(critText, "骰点") {
 		return result, critText
 	}
@@ -754,18 +749,10 @@ func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage strin
 // getDefenderEvasionDR 获取防御者的回避减伤（敏捷调整值）
 // 规则书第271行：回避获得等于敏捷调整值的加值，影响受到的所有攻击效应的伤害
 func getDefenderEvasionDR(ctx *MsgContext, defender string) int64 {
-	dex := int64(0)
-	if val := getNPCAttr(ctx, defender, "敏捷"); val > 0 {
-		dex = val
-	} else if defender == ctx.Player.Name {
-		if v, _ := VarGetValueInt64(ctx, "敏捷"); v > 0 {
-			dex = v
-		}
-	}
+	dex := getAttrValue(ctx, defender, "敏捷", "dex", "Dexterity")
 	if dex <= 10 {
 		return 0
 	}
-	// 敏捷调整值 = floor((敏捷 - 10) / 2)，朝负无穷取整
 	mod := (dex - 10) / 2
 	if mod < 0 {
 		mod = 0

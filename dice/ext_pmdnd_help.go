@@ -32,7 +32,9 @@ func getPmdndHelp() string {
 		"────────────────────────────────────────\n" +
 		"⬆ 以上命令均可输入 .<命令> help 查看详细用法\n" +
 		"⬆ 新玩家输入 .pmdnd guide 查看快速开始教程\n" +
-		"⬆ 常用别名：.属性=.st  .环位=.ring  .长休/.短休=.rest  .暴击=.crit"
+		"⬆ 中文别名：.属性=.st  .检定=.rc  .招式=.move  .伤害=.dmg  .克制=.type\n" +
+		"             .状态=.buff  .天气=.weather  .场地=.terrain  .模式=.pmode\n" +
+		"             .先攻=.init  .敌人=.npc  .濒死=.ds  .制卡=.pmdnd  .休息=.rest"
 }
 
 func getPmdndShortHelp() string {
@@ -60,9 +62,9 @@ func getQuickstartHelp() string {
 		"\n" +
 		"📌 第三步：设置战斗属性\n" +
 		"  根据你的种族和职业设置能力值:\n" +
-		"    .st hp:50 hpmax:50 pp:100 patk:20 pdef:15 satk:25 sdef:18 spd:80\n" +
+		"    .st hp:50 hpmax:50 pp:100 物攻:20 物防:15 特攻:25 特防:18 速度:80\n" +
 		"  💡 设置 hpmax 后攻击会自动显示HP血条\n" +
-		"  💡 pp 影响招式使用次数; spd 影响PMDnD先攻; 敏捷影响回避减伤\n" +
+		"  💡 pp 影响招式使用次数; 速度 影响PMDnD先攻; 敏捷 影响回避减伤\n" +
 		"\n" +
 		"📌 第四步：设置技能熟练\n" +
 		"  分配你的技术熟练点数，技能写修正值即可:\n" +
@@ -86,7 +88,7 @@ func getQuickstartHelp() string {
 		"📌 第八步：创建NPC（敌人）\n" +
 		"  最小配置（伤害计算必设）:\n" +
 		"    .npc new 圈圈熊\n" +
-		"    .npc 圈圈熊 st patk:30 pdef:20 hpmax:100 hp:100 cr:30 type_格斗:1\n" +
+		"    .npc 圈圈熊 st 物攻:30 物防:20 hpmax:100 hp:100 挑战等级:30 type_格斗:1\n" +
 		"  推荐配置（包含先攻和回避）:\n" +
 		"    .npc 圈圈熊 st 敏捷:14 spd:60\n" +
 		"  添加NPC招式:\n" +
@@ -420,10 +422,10 @@ func getNpcHelp() string {
 		"\n" +
 		"📝 可用属性:\n" +
 		"  战斗属性（影响伤害计算，必设）:\n" +
-		"    物攻 patk:数字   物防 pdef:数字   速度 spd:数字\n" +
-		"    特攻 satk:数字   特防 sdef:数字\n" +
+		"    物攻:数字   物防:数字   速度:数字\n" +
+		"    特攻:数字   特防:数字\n" +
 		"    生命 hp:数字     生命上限 hpmax:数字\n" +
-		"    战斗等级 cr:数字  （默认30，影响伤害计算）\n" +
+		"    挑战等级 cr:数字   （默认30，影响伤害和状态伤害计算）\n" +
 		"\n" +
 		"  六项属性（影响先攻/回避，推荐设置）:\n" +
 		"    力量:数字 敏捷:数字 体质:数字 智力:数字 感知:数字 魅力:数字\n" +
@@ -435,7 +437,7 @@ func getNpcHelp() string {
 		"\n" +
 		"📝 示例:\n" +
 		"  .npc new 圈圈熊\n" +
-		"  .npc 圈圈熊 st patk:30 pdef:20 hpmax:100 type_格斗:1\n" +
+		"  .npc 圈圈熊 st 物攻:30 物防:20 hpmax:100 挑战等级:30 type_格斗:1\n" +
 		"  .npc 圈圈熊 st hp-2d5                   # 减少HP\n" +
 		"  .npc 圈圈熊 move add 臂锤 80 格斗 2 物\n" +
 		"  .npc 圈圈熊 move 臂锤 @伊布 +2\n" +

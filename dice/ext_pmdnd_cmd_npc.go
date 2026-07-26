@@ -464,9 +464,31 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 				if newHp < 0 {
 					newHp = 0
 				}
-				VarSetValueInt64(ctx, "hp", newHp)
-				if newHp == 0 && curHp > 0 {
-					triggerDeathSave(ctx, target)
+				overflow := totalDmg - curHp
+				if overflow < 0 {
+					overflow = 0
+				}
+				if overflow >= hpMax && overflow > 0 {
+					flavorLines = append(flavorLines, fmt.Sprintf("💀 溢出伤害 %d ≥ HP上限 %d，%s 被一击致命！", overflow, hpMax, getPlayerNameTempFunc(ctx)))
+					VarSetValueInt64(ctx, "hp", 0)
+					pmdndDeathSavingStable(ctx)
+				} else if curHp <= 0 && totalDmg > 0 {
+					VarSetValueInt64(ctx, "hp", 0)
+					failureCount := int64(1)
+					if critCount > 0 {
+						failureCount = 2
+					}
+					a, b := pmdndDeathSaving(ctx, 0, failureCount)
+					flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 在濒死状态下受到 %d 伤害！死亡豁免+%d失败 (当前: 成功%d 失败%d)", getPlayerNameTempFunc(ctx), totalDmg, failureCount, a, b))
+					exText := pmdndDeathSavingResultCheck(ctx, a, b)
+					if exText != "" {
+						flavorLines = append(flavorLines, exText)
+					}
+				} else {
+					VarSetValueInt64(ctx, "hp", newHp)
+					if newHp == 0 && curHp > 0 {
+						triggerDeathSave(ctx, target)
+					}
 				}
 				pct := newHp * 10 / hpMax
 				if pct > 10 {
@@ -525,7 +547,7 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 		if result.Hit {
 			lines = append(lines, fmt.Sprintf("  基础: %d × %d × %d × %s ÷ (100 × %d) = %d", power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal, result.BaseDmg))
 			if result.StabMul != 1.0 || result.TypeMod != 0 {
-				factor := (2.0 + result.TypeMod) / 2.0
+				factor := damageModifierFactor(result.TypeMod)
 				if factor < 0.25 {
 					factor = 0.25
 				}
@@ -544,7 +566,7 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 	} else if detailMode && result.Hit {
 		calcLine := fmt.Sprintf("📐 %d × %d级 × %d攻 × %s ÷ %d防", power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal)
 		if result.StabMul != 1.0 || result.TypeMod != 0 {
-			factor := (2.0 + result.TypeMod) / 2.0
+			factor := damageModifierFactor(result.TypeMod)
 			if factor < 0.25 {
 				factor = 0.25
 			}
@@ -589,9 +611,31 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 					if newHp < 0 {
 						newHp = 0
 					}
-					VarSetValueInt64(ctx, "hp", newHp)
-					if newHp == 0 && curHp > 0 {
-						triggerDeathSave(ctx, target)
+					overflow := result.FinalDmg - curHp
+					if overflow < 0 {
+						overflow = 0
+					}
+					if overflow >= hpMax && overflow > 0 {
+						flavorLines = append(flavorLines, fmt.Sprintf("💀 溢出伤害 %d ≥ HP上限 %d，%s 被一击致命！", overflow, hpMax, getPlayerNameTempFunc(ctx)))
+						VarSetValueInt64(ctx, "hp", 0)
+						pmdndDeathSavingStable(ctx)
+					} else if curHp <= 0 && result.FinalDmg > 0 {
+						VarSetValueInt64(ctx, "hp", 0)
+						failureCount := int64(1)
+						if result.Crit {
+							failureCount = 2
+						}
+						a, b := pmdndDeathSaving(ctx, 0, failureCount)
+						flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 在濒死状态下受到 %d 伤害！死亡豁免+%d失败 (当前: 成功%d 失败%d)", getPlayerNameTempFunc(ctx), result.FinalDmg, failureCount, a, b))
+						exText := pmdndDeathSavingResultCheck(ctx, a, b)
+						if exText != "" {
+							flavorLines = append(flavorLines, exText)
+						}
+					} else {
+						VarSetValueInt64(ctx, "hp", newHp)
+						if newHp == 0 && curHp > 0 {
+							triggerDeathSave(ctx, target)
+						}
 					}
 					pct := newHp * 10 / hpMax
 					if pct > 10 {

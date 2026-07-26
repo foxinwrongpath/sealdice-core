@@ -330,8 +330,8 @@ func validateMoveTargets(categoryLower string, targets []string, attacker string
 }
 
 // ---------- executeHealMove ----------
-func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, advantage string, ctLimit int64, attacker string, defender string, remainingPP int64, detailMode bool, debugMode bool) CmdExecuteResult {
-	healResult, errMsg := calculateHeal(mctx, power, elemType, advantage, ctLimit, attacker, defender)
+func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, advantage string, ctLimit int64, attacker string, defender string, remainingPP int64, attackBonus int64, detailMode bool, debugMode bool) CmdExecuteResult {
+	healResult, errMsg := calculateHeal(mctx, power, elemType, advantage, ctLimit, attacker, defender, attackBonus)
 	if errMsg != "" {
 		ReplyToSender(mctx, msg, errMsg)
 		return CmdExecuteResult{Matched: true, Solved: true}
@@ -518,10 +518,7 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 		if result.Hit {
 			lines = append(lines, fmt.Sprintf("  基础: %d × %d × %d × %s ÷ (100 × %d) = %d", power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal, result.BaseDmg))
 			if result.StabMul != 1.0 || result.TypeMod != 0 {
-				factor := (2.0 + result.TypeMod) / 2.0
-				if factor < 0.25 {
-					factor = 0.25
-				}
+				factor := damageModifierFactor(result.TypeMod)
 				if result.StabMul != 1.0 && result.TypeMod != 0 {
 					lines = append(lines, fmt.Sprintf("  STAB: x%.2f  |  克制: x%.2f", result.StabMul, factor))
 				} else if result.StabMul != 1.0 {
@@ -543,10 +540,7 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 	} else if detailMode && result.Hit {
 		calcLine := fmt.Sprintf("📐 %d × %d级 × %d攻 × %s ÷ %d防", power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal)
 		if result.StabMul != 1.0 || result.TypeMod != 0 {
-			factor := (2.0 + result.TypeMod) / 2.0
-			if factor < 0.25 {
-				factor = 0.25
-			}
+			factor := damageModifierFactor(result.TypeMod)
 			calcLine += fmt.Sprintf(" × %.2f修正", factor*result.StabMul)
 		}
 		if result.Crit {
@@ -597,9 +591,35 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 					if newHp < 0 {
 						newHp = 0
 					}
-					VarSetValueInt64(ctx, "hp", newHp)
-					if newHp == 0 && curHp > 0 {
-						flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
+					overflow := result.FinalDmg - curHp
+					if overflow < 0 {
+						overflow = 0
+					}
+
+					// 即时死亡：溢出伤害 ≥ HP上限
+					if overflow >= hpMax && overflow > 0 {
+						flavorLines = append(flavorLines, fmt.Sprintf("💀 溢出伤害 %d ≥ HP上限 %d，%s 被一击致命！", overflow, hpMax, getPlayerNameTempFunc(ctx)))
+						newHp = 0
+						VarSetValueInt64(ctx, "hp", 0)
+						pmdndDeathSavingStable(ctx)
+					} else if curHp <= 0 && result.FinalDmg > 0 {
+						// HP 已为 0 时受伤 → 死亡豁免失败
+						VarSetValueInt64(ctx, "hp", 0)
+						failureCount := int64(1)
+						if result.Crit {
+							failureCount = 2
+						}
+						a, b := pmdndDeathSaving(ctx, 0, failureCount)
+						flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 在濒死状态下受到 %d 伤害！死亡豁免+%d失败 (当前: 成功%d 失败%d)", getPlayerNameTempFunc(ctx), result.FinalDmg, failureCount, a, b))
+						exText := pmdndDeathSavingResultCheck(ctx, a, b)
+						if exText != "" {
+							flavorLines = append(flavorLines, exText)
+						}
+					} else {
+						VarSetValueInt64(ctx, "hp", newHp)
+						if newHp == 0 && curHp > 0 {
+							flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
+						}
 					}
 					pct := newHp * 10 / hpMax
 					if pct > 10 {
@@ -729,9 +749,29 @@ func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name s
 			if newHp < 0 {
 				newHp = 0
 			}
-			VarSetValueInt64(ctx, "hp", newHp)
-			if newHp == 0 && curHp > 0 {
-				flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
+			overflow := totalDmg - curHp
+			if overflow < 0 {
+				overflow = 0
+			}
+			if overflow >= hpMax && overflow > 0 {
+				flavorLines = append(flavorLines, fmt.Sprintf("💀 溢出伤害 %d ≥ HP上限 %d，%s 被一击致命！", overflow, hpMax, getPlayerNameTempFunc(ctx)))
+				pmdndDeathSavingStable(ctx)
+			} else if curHp <= 0 && totalDmg > 0 {
+				failureCount := int64(1)
+				if critCount > 0 {
+					failureCount = 2
+				}
+				a, b := pmdndDeathSaving(ctx, 0, failureCount)
+				flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 在濒死状态下受到 %d 伤害！死亡豁免+%d失败 (当前: 成功%d 失败%d)", getPlayerNameTempFunc(ctx), totalDmg, failureCount, a, b))
+				exText := pmdndDeathSavingResultCheck(ctx, a, b)
+				if exText != "" {
+					flavorLines = append(flavorLines, exText)
+				}
+			} else {
+				VarSetValueInt64(ctx, "hp", newHp)
+				if newHp == 0 && curHp > 0 {
+					flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
+				}
 			}
 			pct := newHp * 10 / hpMax
 			if pct > 10 {
@@ -1030,7 +1070,7 @@ var cmdMove = &CmdItemInfo{
 					ReplyToSender(mctx, msg, "治疗只能指定一个目标，暂不支持群体")
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
-				return executeHealMove(ctx, mctx, msg, name, int64(power), elemType, advantage, ctLimit, attacker, targets[0], newPP, detailMode, debugMode)
+				return executeHealMove(ctx, mctx, msg, name, int64(power), elemType, advantage, ctLimit, attacker, targets[0], newPP, attackBonus, detailMode, debugMode)
 			}
 
 			if categoryLower == "强化" || categoryLower == "buff" {

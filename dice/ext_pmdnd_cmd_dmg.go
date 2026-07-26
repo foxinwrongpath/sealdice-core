@@ -169,7 +169,7 @@ var cmdDmg = &CmdItemInfo{
 				lines = append(lines, fmt.Sprintf("  基础: %d × %d × %d × %s ÷ (100 × %d) = %d",
 					power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal, result.BaseDmg))
 				if result.StabMul != 1.0 || result.TypeMod != 0 {
-					factor := (2.0 + result.TypeMod) / 2.0
+					factor := damageModifierFactor(result.TypeMod)
 					if factor < 0.25 {
 						factor = 0.25
 					}
@@ -192,7 +192,7 @@ var cmdDmg = &CmdItemInfo{
 			calcLine := fmt.Sprintf("📐 %d × %d级 × %d攻 × %s ÷ %d防",
 				power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal)
 			if result.StabMul != 1.0 || result.TypeMod != 0 {
-				factor := (2.0 + result.TypeMod) / 2.0
+				factor := damageModifierFactor(result.TypeMod)
 				if factor < 0.25 {
 					factor = 0.25
 				}

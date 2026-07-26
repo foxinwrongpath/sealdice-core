@@ -404,11 +404,39 @@ func getSevereState(name string) string {
 func applyCumulativeEffect(ctx *MsgContext, target string, state *BattleState) string {
 	var effects []string
 
+	targetCR := int64(30)
+	targetPdef := int64(10)
+	targetSdef := int64(10)
+
+	getAttr := func(key string) int64 {
+		if val := getNPCAttr(ctx, target, key); val > 0 {
+			return val
+		}
+		if target == ctx.Player.Name {
+			if v, _ := VarGetValueInt64(ctx, key); v > 0 {
+				return v
+			}
+		}
+		return 0
+	}
+
+	for _, key := range []string{"挑战等级", "cr", "战斗等级"} {
+		if v := getAttr(key); v > 0 {
+			targetCR = v
+			break
+		}
+	}
+	if v := getAttr("pdef"); v > 0 {
+		targetPdef = v
+	}
+	if v := getAttr("sdef"); v > 0 {
+		targetSdef = v
+	}
+
 	for name, layers := range state.Cumulative {
 		if layers <= 0 {
 			continue
 		}
-
 		if layers >= 20 {
 			severeName := getSevereState(name)
 			if severeName != "" {
@@ -417,10 +445,24 @@ func applyCumulativeEffect(ctx *MsgContext, target string, state *BattleState) s
 				continue
 			}
 		}
-
 		if effect, ok := StateEffects[name]; ok {
 			if effect.DamagePerLayer > 0 {
-				damage := int64(layers * effect.DamagePerLayer)
+				// 选择防御值（状态属性决定物/特）
+				defRaw := targetPdef
+				if name == "破防" || name == "诅咒" {
+					defRaw = targetSdef
+				}
+				if defRaw < 1 {
+					defRaw = 1
+				}
+				// 状态伤害公式: power威力 × CR² / (100 × defRaw)
+				totalPower := int64(layers * effect.DamagePerLayer)
+				statusDmg := totalPower * targetCR * targetCR / (100 * defRaw)
+				if statusDmg < 1 {
+					statusDmg = 1
+				}
+
+				damage := statusDmg
 				if target == ctx.Player.Name {
 					if hpMax, exists := VarGetValueInt64(ctx, "hpmax"); exists && hpMax > 0 {
 						curHp, _ := VarGetValueInt64(ctx, "hp")
@@ -429,11 +471,11 @@ func applyCumulativeEffect(ctx *MsgContext, target string, state *BattleState) s
 							newHp = 0
 						}
 						VarSetValueInt64(ctx, "hp", newHp)
-						effects = append(effects, fmt.Sprintf("%s 受到 %d 点 %s 伤害", target, damage, name))
+						effects = append(effects, fmt.Sprintf("%s 受到 %d 点 %s 状态伤害", target, damage, name))
 					}
 				} else {
 					if newHp, maxHp, ok := updateNPCHP(ctx, target, damage); ok && maxHp > 0 {
-						effects = append(effects, fmt.Sprintf("%s 受到 %d 点 %s 伤害 (HP: %d/%d)", target, damage, name, newHp, maxHp))
+						effects = append(effects, fmt.Sprintf("%s 受到 %d 点 %s 状态伤害 (HP: %d/%d)", target, damage, name, newHp, maxHp))
 					}
 				}
 			}

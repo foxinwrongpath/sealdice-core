@@ -263,28 +263,13 @@ var cmdPmi = &CmdItemInfo{
 
 // getPMDnDInitiativeStats 读取角色/NPC 的敏捷和速度属性值
 func getPMDnDInitiativeStats(ctx *MsgContext, name string) (dex int64, spd int64) {
-	dex = int64(10)
-	spd = int64(10)
-	if val := getNPCAttr(ctx, name, "敏捷"); val > 0 {
-		dex = val
-	} else if name == ctx.Player.Name {
-		if v, _ := VarGetValueInt64(ctx, "敏捷"); v > 0 {
-			dex = v
-		}
+	dex = getAttrValue(ctx, name, "敏捷", "dex", "Dexterity")
+	if dex < 1 {
+		dex = 10
 	}
-	if val := getNPCAttr(ctx, name, "spd"); val > 0 {
-		spd = val
-	} else if val := getNPCAttr(ctx, name, "速度"); val > 0 {
-		spd = val
-	} else if name == ctx.Player.Name {
-		if v, _ := VarGetValueInt64(ctx, "spd"); v > 0 {
-			spd = v
-		}
-		if spd == 0 {
-			if v, _ := VarGetValueInt64(ctx, "速度"); v > 0 {
-				spd = v
-			}
-		}
+	spd = getAttrValue(ctx, name, "spd", "速度", "speed")
+	if spd < 1 {
+		spd = 10
 	}
 	return
 }
