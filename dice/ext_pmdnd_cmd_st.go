@@ -17,7 +17,7 @@ var cmdSt = getCmdStBase(CmdStOverrideInfo{
 		".st help // 帮助\n" +
 		".st <属性>:<值> // 设置属性，例：.st 感知:20 洞悉:3\n" +
 		".st <属性>±<表达式> // 修改属性，例：.st hp+1d4\n" +
-		".st <属性>±<表达式> @某人 // 修改他人属性\n",
+		".st <属性>±<表达式> @某位 // 修改其他宝可梦属性\n",
 	TemplateName: "pmdnd",
 	CommandSolve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) *CmdExecuteResult {
 		val := cmdArgs.GetArgN(1)

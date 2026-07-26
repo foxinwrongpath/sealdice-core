@@ -4,7 +4,7 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 	theExt := &ExtInfo{
 		Name:       "pmdnd",
 		Version:    "1.1.0",
-		Brief:      "提供PMDnD规则TRPG支持 - 宝可梦主题d20系统（标准化指令）",
+		Brief:      "提供PMDnD规则TRPG支持 - 宝可梦d20系统",
 		Author:     "SealDice",
 		AutoActive: true,
 		Official:   true,

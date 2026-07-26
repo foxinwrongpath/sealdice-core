@@ -117,7 +117,7 @@ var cmdInit = &CmdItemInfo{
 			_, isNPC := npcData[name]
 
 			if !isPlayer && !isNPC {
-				ReplyToSender(ctx, msg, fmt.Sprintf("❌ %s 不存在，请先创建:\n  玩家: 无需创建，直接使用\n  NPC: .npc new %s", name, name))
+				ReplyToSender(ctx, msg, fmt.Sprintf("❌ %s 不存在，请先创建:\n  冒险者: 无需创建，直接使用\n  NPC: .npc new %s", name, name))
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 
