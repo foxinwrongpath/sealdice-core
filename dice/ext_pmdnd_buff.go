@@ -507,42 +507,6 @@ func stateToString(state *BattleState) string {
 
 // ---------- .buff 命令 ----------
 
-func getBuffHelp() string {
-	return "PMDnD 战斗状态管理:\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		".buff stat [目标]             查看目标状态\n" +
-		".buff add <目标> <状态> <层数>  添加累积型状态\n" +
-		".buff remove <目标> <状态> <层数> 移除层数\n" +
-		".buff set <名称> <值>         设置能力等级\n" +
-		".buff reset                   重置所有目标的能力等级（战斗结束）\n" +
-		".buff tick                    推进所有状态1回合\n" +
-		".buff clear [目标]            清除目标的所有状态\n" +
-		".buff clear all               清除所有目标的所有状态\n" +
-		"\n" +
-		"📋 状态分类:\n" +
-		"  能力等级（物攻+2等）: 战斗结束自动重置\n" +
-		"  累积型状态（灼伤、中毒等）: 不会自动消失，需要治疗\n" +
-		"\n" +
-		"📝 战斗结束流程:\n" +
-		"  1. .init clr      # 清空先攻列表，重置能力等级\n" +
-		"  2. (治疗)         # 如有需要，用 .buff remove 移除状态\n" +
-		"  3. .buff clear all # 或在宝可梦中心完全恢复时使用\n" +
-		"\n" +
-		"📋 累积型状态:\n" +
-		"  灼伤, 冻伤, 中毒, 溶解, 破防, 麻痹, 瞌睡,\n" +
-		"  困惑, 畏缩, 恍惚, 迷离, 腐蚀, 信息素, 看破, 共振,\n" +
-		"  诅咒, 祝福, 流血\n" +
-		"  20层转为严重状态（严重灼伤、剧毒、完全麻痹等）\n" +
-		"\n" +
-		"📝 示例:\n" +
-		"  .buff add 圈圈熊 灼伤 5       # 给圈圈熊加5层灼伤\n" +
-		"  .buff stat 圈圈熊             # 查看圈圈熊状态\n" +
-		"  .buff tick                    # 推进一回合\n" +
-		"  .buff reset                   # 战斗结束，重置能力等级\n" +
-		"  .buff clear all               # 宝可梦中心完全恢复\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-}
-
 var cmdBuff = &CmdItemInfo{
 	Name:      "buff",
 	ShortHelp: ".buff stat [目标]             查看状态\n.buff add <目标> <状态> <层数>  添加状态\n.buff tick                    推进回合\n.buff set <名称> <值>         设置能力等级",

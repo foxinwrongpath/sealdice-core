@@ -8,17 +8,7 @@ import (
 var cmdRing = &CmdItemInfo{
 	Name:      "ring",
 	ShortHelp: ".ring show              查看最大可用环位\n.ring set <环位>        设置最大可用环位",
-	Help: "PMDnD 环位管理:\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		".ring show              查看当前最大可用环位\n" +
-		".ring set <环位>        设置最大可用环位（影响PP消耗倍率）\n" +
-		"  例: .ring set 3\n" +
-		"\n" +
-		"📋 说明:\n" +
-		"  环位决定招式消耗的PP = 环位 × 30\n" +
-		"  设置最大环位后，即可使用不超过该环位的招式\n" +
-		"  未设置时默认为 0（无法使用需要环位的招式）\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+	Help:          getRingHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		sub := cmdArgs.GetArgN(1)

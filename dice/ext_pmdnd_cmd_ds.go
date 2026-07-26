@@ -58,24 +58,6 @@ func pmdndDeathSavingResultCheck(ctx *MsgContext, a int64, b int64) string {
 	return ""
 }
 
-// ---------- 帮助文本 ----------
-func getDsHelp() string {
-	return "PMDnD 濒死豁免:\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		".ds                     进行濒死豁免检定\n" +
-		".ds 成功±N              调整成功次数（例: .ds 成功+1）\n" +
-		".ds 失败±N              调整失败次数（例: .ds 失败-1）\n" +
-		".ds stat                查看当前豁免状态\n" +
-		".ds help                显示本帮助\n" +
-		"\n" +
-		"📋 规则说明:\n" +
-		"  3次成功 → 伤势稳定，脱离危险\n" +
-		"  3次失败 → 角色永久失去战斗能力\n" +
-		"  d20=1   → 计为2次失败\n" +
-		"  d20=20  → 立即恢复1点HP，脱离濒死\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-}
-
 // ---------- .ds 命令 ----------
 var cmdDs = &CmdItemInfo{
 	Name:          "ds",

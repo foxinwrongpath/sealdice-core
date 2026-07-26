@@ -82,6 +82,8 @@ func stpFormat(attrName string) string {
 	return "$stp_" + attrName
 }
 
+var dnd5eCmdRc *CmdItemInfo
+
 func RegisterBuiltinExtDnd5e(self *Dice) {
 	deathSavingStable := func(ctx *MsgContext) {
 		VarDelValue(ctx, "DSS")
@@ -401,7 +403,7 @@ func RegisterBuiltinExtDnd5e(self *Dice) {
 		".rc 劣势 <表达式> [<原因>] // .rc 劣势 力量+4 推一下试试\n" +
 		".rc <表达式> @某人 // 对某人做检定"
 
-	cmdRc := &CmdItemInfo{
+	dnd5eCmdRc = &CmdItemInfo{
 		// Pinenutn: 从这里添加是否检查有多次检定，很隐蔽，通过简单研究cmdArgs是看不出来的，尚未清楚此处逻辑来源
 		EnableExecuteTimesParse: true,
 		Name:                    "rc",
@@ -415,6 +417,8 @@ func RegisterBuiltinExtDnd5e(self *Dice) {
 				mctx.DelegateText = ctx.DelegateText
 				if ctx.Dice != nil {
 					if baseTmpl, ok := ctx.Dice.GameSystemMap.Load("dnd5e"); ok && baseTmpl != nil {
+						mctx.SystemTemplate = baseTmpl
+					} else if baseTmpl, ok := ctx.Dice.GameSystemMap.Load("pmdnd"); ok && baseTmpl != nil {
 						mctx.SystemTemplate = baseTmpl
 					}
 				}
@@ -1664,11 +1668,11 @@ func RegisterBuiltinExtDnd5e(self *Dice) {
 			// "属性":    cmdSt,
 			"st":         cmdSt,
 			"dst":        cmdSt,
-			"rc":         cmdRc,
-			"ra":         cmdRc,
-			"rah":        cmdRc,
-			"rch":        cmdRc,
-			"drc":        cmdRc,
+			"rc":         dnd5eCmdRc,
+			"ra":         dnd5eCmdRc,
+			"rah":        dnd5eCmdRc,
+			"rch":        dnd5eCmdRc,
+			"drc":        dnd5eCmdRc,
 			"buff":       cmdBuff,
 			"dbuff":      cmdBuff,
 			"spellslots": cmdSpellSlot,

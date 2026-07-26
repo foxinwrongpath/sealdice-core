@@ -302,7 +302,7 @@ func getNPCMove(ctx *MsgContext, npcName string, moveName string) (map[string]in
 }
 
 // ---------- NPC 攻击 ----------
-func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName string, target string, advantage string, ctLimit int64, detailMode bool, debugMode bool) CmdExecuteResult {
+func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName string, target string, advantage string, ctLimit int64, attackBonus int64, detailMode bool, debugMode bool) CmdExecuteResult {
 	// 获取招式数据
 	move, ok := getNPCMove(ctx, npcName, moveName)
 	if !ok {
@@ -385,7 +385,7 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 		var hitCountActual int
 
 		for i := 0; i < hitCount; i++ {
-			result, errMsg := calculateDamage(ctx, power, elemType, isSpecial, advantage, ctLimit, attacker, target)
+			result, errMsg := calculateDamage(ctx, power, elemType, isSpecial, advantage, ctLimit, attacker, target, attackBonus)
 			if errMsg != "" {
 				ReplyToSender(ctx, msg, errMsg)
 				return CmdExecuteResult{Matched: true, Solved: true}
@@ -401,6 +401,14 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 
 			pctDisplay := fmt.Sprintf("%.0f%%", result.RollPct*100)
 			detail := fmt.Sprintf("  #%d: d20=%d", i+1, result.D20)
+			if attackBonus != 0 {
+				if attackBonus > 0 {
+					detail += fmt.Sprintf(" + %d", attackBonus)
+				} else {
+					detail += fmt.Sprintf(" - %d", -attackBonus)
+				}
+			}
+			detail += fmt.Sprintf(" = %d", result.AttackRoll)
 			if result.Hit && result.FinalDmg > 0 {
 				if debugMode {
 					detail += fmt.Sprintf(" → %s → 伤害 %d", pctDisplay, result.FinalDmg)
@@ -427,7 +435,13 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 
 		// 战斗演说
 		flavorLines := []string{}
-		flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 对 %s 使用了 %s！", npcName, target, moveName))
+	flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 对 %s 使用了 %s！", npcName, target, moveName))
+		if hitCountActual > 0 {
+			flavorLines = append(flavorLines, fmt.Sprintf("  %s", randomBattleFlavor(DamageResult{
+				Crit: critCount > 0, Hit: true, FinalDmg: totalDmg,
+				RollPct: 1.0, EffectText: "",
+			}, npcName, target)))
+		}
 		flavorLines = append(flavorLines, fmt.Sprintf("  攻击 %d 次，命中 %d 次！", hitCount, hitCountActual))
 		if critCount > 0 {
 			flavorLines = append(flavorLines, fmt.Sprintf("  其中 %d 次暴击！", critCount))
@@ -472,7 +486,7 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 	}
 
 	// 单次攻击
-	result, errMsg := calculateDamage(ctx, power, elemType, isSpecial, advantage, ctLimit, attacker, target)
+	result, errMsg := calculateDamage(ctx, power, elemType, isSpecial, advantage, ctLimit, attacker, target, attackBonus)
 	if errMsg != "" {
 		ReplyToSender(ctx, msg, errMsg)
 		return CmdExecuteResult{Matched: true, Solved: true}
@@ -483,6 +497,14 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 
 	// 1. 骰子行
 	diceLine := fmt.Sprintf("🎲 d20=%d", result.D20)
+	if attackBonus != 0 {
+		if attackBonus > 0 {
+			diceLine += fmt.Sprintf(" + %d", attackBonus)
+		} else {
+			diceLine += fmt.Sprintf(" - %d", -attackBonus)
+		}
+	}
+	diceLine += fmt.Sprintf(" = %d", result.AttackRoll)
 	if result.Hit && result.RollPct > 0 {
 		diceLine += fmt.Sprintf(" → %s", pctDisplay)
 	}
@@ -591,55 +613,9 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 }
 
 // ---------- cmdNPC ----------
-func getNpcHelp() string {
-	return "PMDnD NPC 管理:\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"📌 为战斗中的宝可梦（敌人/盟友）设置数据。\n" +
-		"\n" +
-		"📖 基础操作:\n" +
-		"  .npc new <名称>                      创建新NPC\n" +
-		"  .npc <名称> st <属性1>:<值1> ...     设置属性（类似 .st）\n" +
-		"  .npc <名称> st <属性1>+<值1>         增加属性（支持表达式如 2d5）\n" +
-		"  .npc <名称> st <属性1>-<值1>         减少属性（支持表达式如 2d5）\n" +
-		"  .npc <名称> show                     查看NPC属性\n" +
-		"  .npc list                            列出所有NPC\n" +
-		"  .npc del <名称>                      删除NPC\n" +
-		"  .npc clear                           清除所有NPC\n" +
-		"\n" +
-		"📋 招式管理:\n" +
-		"  .npc <名称> move add <招式名> <威力> <类型> <环位> <类别> [hits:2-5]\n" +
-		"  .npc <名称> move list                列出NPC招式\n" +
-		"  .npc <名称> move del <招式名>        删除NPC招式\n" +
-		"  .npc <名称> move clear               清除NPC所有招式\n" +
-		"\n" +
-		"⚔️ 战斗:\n" +
-		"  .npc <名称> move <招式名> [@目标] [优势/劣势] [暴击阈值] [detail] [debug]\n" +
-		"  例: .npc 圈圈熊 move 臂锤 @伊布\n" +
-		"\n" +
-		"📝 可用属性:\n" +
-		"  物攻 patk:数字   物防 pdef:数字   速度 spd:数字\n" +
-		"  特攻 satk:数字   特防 sdef:数字\n" +
-		"  生命 hp:数字     生命上限 hpmax:数字\n" +
-		"  战斗等级 cr:数字   (默认30，影响伤害计算)\n" +
-		"  属性类型 type_火:1  type_水:1  type_格斗:1  ……\n" +
-		"\n" +
-		"📝 示例:\n" +
-		"  .npc new 圈圈熊\n" +
-		"  .npc 圈圈熊 st patk:30 pdef:20 hpmax:100 type_格斗:1\n" +
-		"  .npc 圈圈熊 st hp-2d5                   # 减少HP\n" +
-		"  .npc 圈圈熊 move add 臂锤 80 格斗 2 物\n" +
-		"  .npc 圈圈熊 move 臂锤 @伊布\n" +
-		"  .npc 圈圈熊 show\n" +
-		"\n" +
-		"💡 设置 hpmax 后，攻击会自动扣血并显示血条\n" +
-		"💡 NPC 使用招式不消耗 PP，无需设置 pp\n" +
-		"💡 当 NPC 的 HP 降到 0 时，会自动清理其战斗状态\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-}
-
 var cmdNPC = &CmdItemInfo{
 	Name:          "npc",
-	ShortHelp:     ".npc new <名称>\n.npc <名称> st <属性>:<值>\n.npc <名称> show\n.npc <名称> move <招式名> [@目标]",
+	ShortHelp:     ".npc new <名称>\n.npc <名称> st <属性>:<值>\n.npc <名称> show\n.npc <名称> move <招式名> [@目标] [+N/-N]",
 	Help:          getNpcHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
@@ -1068,7 +1044,7 @@ var cmdNPC = &CmdItemInfo{
 
 			default:
 				// ============================================
-				// .npc <名称> move <招式名> [@目标] [优势/劣势] ...
+				// .npc <名称> move <招式名> [@目标] [优势/劣势] [+N/-N] ...
 				// ============================================
 				moveName := moveSub
 				if moveName == "" {
@@ -1076,10 +1052,26 @@ var cmdNPC = &CmdItemInfo{
 					return CmdExecuteResult{Matched: true, Solved: true}
 				}
 
+				// 支持 "臂锤+2" 这种将加值拼在招式名后面的写法
+				strippedName := moveName
+				suffixBonus := int64(0)
+				if _, ok := getNPCMove(ctx, npcName, moveName); !ok {
+					if idx := strings.LastIndexAny(moveName, "+-"); idx > 0 && idx < len(moveName)-1 {
+						if n, err := strconv.ParseInt(moveName[idx:], 10, 64); err == nil {
+							candidate := moveName[:idx]
+							if _, ok2 := getNPCMove(ctx, npcName, candidate); ok2 {
+								strippedName = candidate
+								suffixBonus = n
+							}
+						}
+					}
+				}
+
 				// 解析参数
 				target := ""
 				advantage := ""
 				ctLimit := int64(20)
+				attackBonus := int64(0)
 				detailMode := false
 				debugMode := false
 
@@ -1095,12 +1087,20 @@ var cmdNPC = &CmdItemInfo{
 						detailMode = true
 					} else if p == "debug" || p == "-D" {
 						debugMode = true
+					} else if strings.HasPrefix(p, "+") {
+						if n, e := strconv.ParseInt(p[1:], 10, 64); e == nil {
+							attackBonus = n
+						}
+					} else if strings.HasPrefix(p, "-") {
+						if n, e := strconv.ParseInt(p[1:], 10, 64); e == nil {
+							attackBonus = -n
+						}
 					} else if n, e := strconv.ParseInt(p, 10, 64); e == nil && n >= 2 && n <= 20 {
 						ctLimit = n
 					}
 				}
 
-				return executeNPCAttack(ctx, msg, npcName, moveName, target, advantage, ctLimit, detailMode, debugMode)
+				return executeNPCAttack(ctx, msg, npcName, strippedName, target, advantage, ctLimit, attackBonus+suffixBonus, getPmdndDetailMode(ctx, detailMode), getPmdndDebugMode(ctx, debugMode))
 			}
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}

@@ -5,21 +5,6 @@ import (
 )
 
 // ----- 天气命令 -----
-func getWeatherHelp() string {
-	return "PMDnD 天气管理:\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		".weather                查看当前天气\n" +
-		".weather 大晴天          设置天气为大晴天（火系×1.5，水系×0.5）\n" +
-		".weather 下雨            设置为下雨（水系×1.5，火系×0.5）\n" +
-		".weather 沙暴            设置为沙暴（岩石系×1.5）\n" +
-		".weather 冰雹            设置为冰雹（冰系×1.5）\n" +
-		".weather 雪景            设置为雪景（冰系×1.5）\n" +
-		".weather clear          清除天气\n" +
-		"\n" +
-		"💡 天气会持续影响战斗，直到被清除或切换\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-}
-
 var cmdWeather = &CmdItemInfo{
 	Name:      "weather",
 	ShortHelp: ".weather                查看当前天气\n.weather 大晴天          设置天气",
@@ -74,22 +59,6 @@ var cmdWeather = &CmdItemInfo{
 }
 
 // ----- 场地命令 -----
-func getTerrainHelp() string {
-	return "PMDnD 场地管理:\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		".terrain                查看当前场地\n" +
-		".terrain 电气场地        设置为电气场地（电系×1.3）\n" +
-		".terrain 青草场地        设置为青草场地（草系×1.3，治疗×1.3）\n" +
-		".terrain 精神场地        设置为精神场地（超能力系×1.3）\n" +
-		".terrain 薄雾场地        设置为薄雾场地（妖精系×1.3）\n" +
-		".terrain 龙之场地        设置为龙之场地（龙系×1.3）\n" +
-		".terrain 失序场地        设置为失序场地（多数属性×1.2）\n" +
-		".terrain clear          清除场地\n" +
-		"\n" +
-		"💡 场地会持续影响战斗，直到被清除或切换\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-}
-
 var cmdTerrain = &CmdItemInfo{
 	Name:      "terrain",
 	ShortHelp: ".terrain                查看当前场地\n.terrain 电气场地          设置场地",

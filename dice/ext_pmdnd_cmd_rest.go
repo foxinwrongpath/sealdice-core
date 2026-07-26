@@ -7,10 +7,7 @@ import (
 var cmdRest = &CmdItemInfo{
 	Name:      "rest",
 	ShortHelp: ".rest {long|short}",
-	Help: "PMDnD 休息:\n" +
-		".rest long    长休（恢复全部HP和PP）\n" +
-		".rest short   短休（恢复最大值的50%）\n" +
-		"快捷别名：.长休  .短休",
+	Help:          getRestHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		sub := cmdArgs.GetArgN(1)

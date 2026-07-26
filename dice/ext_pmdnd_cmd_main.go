@@ -7,57 +7,6 @@ import (
 	"strings"
 )
 
-func getPmdndHelp() string {
-	return "PMDnD 扩展命令列表:\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"📋 属性管理\n" +
-		"  .st / .属性       属性管理 (设置/查看/删除)\n" +
-		"\n" +
-		"🎲 技能检定\n" +
-		"  .rc               技能检定 (公开)\n" +
-		"  .rah / .rch       暗骰 (结果私聊)\n" +
-		"\n" +
-		"💀 濒死豁免\n" +
-		"  .ds / .死亡豁免   濒死豁免检定 (查看/调整状态)\n" +
-		"\n" +
-		"💍 资源管理\n" +
-		"  .ring / .环位     设置最大可用环位（影响PP消耗）\n" +
-		"  .rest             长休/短休 (.rest long/short)\n" +
-		"  .长休 / .短休     快捷休息 (恢复HP和PP)\n" +
-		"\n" +
-		"⚔️ 战斗\n" +
-		"  .dmg              伤害计算\n" +
-		"  .move             招式管理 (含治疗/强化自动识别)\n" +
-		"  .stab             本系加成查询\n" +
-		"  .type             属性克制查询\n" +
-		"  .crit / .暴击     暴击判定\n" +
-		"  .buff             战斗状态管理 (能力等级/护盾/结界)\n" +
-		"  .weather          天气管理 (大晴天/下雨/沙暴等)\n" +
-		"  .terrain          场地管理 (电气/青草/精神等)\n" +
-		"\n" +
-		"👾 NPC\n" +
-		"  .npc              NPC属性管理 + 招式 + 攻击\n" +
-		"\n" +
-		"🎯 先攻与行动\n" +
-		"  .init             先攻列表管理 (含 .ri 快捷添加)\n" +
-		"  .action / .行动   行动资源管理\n" +
-		"\n" +
-		"🎴 制卡\n" +
-		"  .pmdnd            生成属性 (自由分配)\n" +
-		"  .pmdndx           生成属性 (预设模式)\n" +
-		"\n" +
-		"💡 PP消耗规则: 招式PP = 环位 × 30\n" +
-		"   使用 .st ppmax:XXX 设置最大PP，.st pp:XXX 设置当前PP\n" +
-		"   详细帮助: .<命令> help  例: .dmg help\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-}
-
-func getPmdndShortHelp() string {
-	return ".pmdnd help     显示所有命令\n" +
-		".pmdnd [数量]   生成属性（自由分配）\n" +
-		".pmdndx [数量]  生成属性（预设模式）"
-}
-
 var cmdPmdnd = &CmdItemInfo{
 	Name:      "pmdnd",
 	ShortHelp: getPmdndShortHelp(),

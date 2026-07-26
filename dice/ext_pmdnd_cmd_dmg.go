@@ -6,51 +6,10 @@ import (
 	"strings"
 )
 
-// ---------- .dmg 帮助函数 ----------
-func getDmgHelp() string {
-	return "PMDnD 伤害计算(.dmg):\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者] [detail] [debug]\n" +
-		"  例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊\n" +
-		"  例: .dmg 格斗 80 物 @圈圈熊           # 自己攻击圈圈熊\n" +
-		"  例: .dmg 格斗 80 物 @圈圈熊 @伊布     # 圈圈熊攻击伊布\n" +
-		"  例: .dmg 火 80 特 detail               # 显示简要计算\n" +
-		"  例: .dmg 火 80 特 debug                # 显示完整计算\n" +
-		"\n" +
-		"📋 @ 参数规则:\n" +
-		"  一个 @ → 防御者（被攻击的目标），攻击者默认为自己\n" +
-		"  两个 @ → 第一个是攻击者，第二个是防御者\n" +
-		"\n" +
-		"👾 NPC使用: 先用 .npc set <名称> <属性>:<值> 设置NPC属性\n" +
-		"   然后 @NPC 即可自动读取攻击/防御数值\n" +
-		"\n" +
-		"📋 参数说明:\n" +
-		"  类型: 攻击的属性（火/水/草/格斗/一般等）\n" +
-		"  威力: 招式的威力值（数字）\n" +
-		"  物/特: 物理攻击或特殊攻击（默认物理）\n" +
-		"  优势/劣势: d20掷骰的优势或劣势\n" +
-		"  暴击阈值: 触发暴击的d20出目（默认20）\n" +
-		"  @攻击者: 攻击者名称（默认自己）\n" +
-		"  @防御者: 防御者名称\n" +
-		"  detail: 显示简要计算过程\n" +
-		"  debug: 显示完整计算详情\n" +
-		"\n" +
-		"💡 不指定 @防御者 时自动从先攻列表选取\n" +
-		"💡 不指定 @攻击者 时默认为自己\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-}
-
-func getDmgShortHelp() string {
-	return ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者] [detail] [debug]\n" +
-		"示例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊\n" +
-		"一个 @ → 防御者，攻击者是自己\n" +
-		"两个 @ → 第一个攻击者，第二个防御者"
-}
-
 // ---------- .dmg 命令 ----------
 var cmdDmg = &CmdItemInfo{
 	Name:          "dmg",
-	ShortHelp:     ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者] [detail] [debug]\n示例: .dmg 火 80 物 优势 19 @伊布 @圈圈熊",
+	ShortHelp:     ".dmg <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [+N/-N] [@攻击者] [@防御者] [detail] [debug]\n示例: .dmg 火 80 物 优势 19 +2 @伊布 @圈圈熊",
 	Help:          getDmgHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
@@ -66,7 +25,7 @@ var cmdDmg = &CmdItemInfo{
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
-		// 新格式: <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [@攻击者] [@防御者] [detail] [debug]
+		// 新格式: <类型> <威力> [物/特] [优势/劣势] [暴击阈值] [+N/-N] [@攻击者] [@防御者] [detail] [debug]
 		atkType := getPMDnDType(parts[0])
 		if _, ok := pmdndTypeChart[atkType]; !ok {
 			ReplyToSender(ctx, msg, fmt.Sprintf("未知类型: %s，可用类型: %s", parts[0], strings.Join(pmdndTypeNames, " ")))
@@ -87,6 +46,7 @@ var cmdDmg = &CmdItemInfo{
 		defender := ""
 		detailMode := false
 		debugMode := false
+		attackBonus := int64(0)
 
 		// ----- 先收集所有 @ 目标 -----
 		var atTargets []string
@@ -100,6 +60,14 @@ var cmdDmg = &CmdItemInfo{
 				detailMode = true
 			} else if p == "debug" || p == "-D" {
 				debugMode = true
+			} else if strings.HasPrefix(p, "+") {
+				if n, e := strconv.ParseInt(p[1:], 10, 64); e == nil {
+					attackBonus = n
+				}
+			} else if strings.HasPrefix(p, "-") {
+				if n, e := strconv.ParseInt(p[1:], 10, 64); e == nil {
+					attackBonus = -n
+				}
 			} else {
 				otherArgs = append(otherArgs, p)
 			}
@@ -155,18 +123,31 @@ var cmdDmg = &CmdItemInfo{
 			mctx = GetCtxProxyFirst(ctx, cmdArgs)
 		}
 
-		result, errMsg := calculateDamage(mctx, power, atkType, isSpecial, advantage, ctLimit, attacker, defender)
+		// 调用 calculateDamage 时传入 attackBonus
+		result, errMsg := calculateDamage(mctx, power, atkType, isSpecial, advantage, ctLimit, attacker, defender, attackBonus)
 		if errMsg != "" {
 			ReplyToSender(ctx, msg, errMsg)
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 
+		// 合并全局输出模式
+		detailMode = getPmdndDetailMode(ctx, detailMode)
+		debugMode = getPmdndDebugMode(ctx, debugMode)
+
 		// ========== 输出格式（三段式，与 .move 统一） ==========
 		var lines []string
-		pctDisplay := fmt.Sprintf("%.0f%%", float64(result.RollPct))
+		pctDisplay := fmt.Sprintf("%.0f%%", result.RollPct*100)
 
-		// 1. 骰子行
+		// 1. 骰子行（显示攻击掷骰过程）
 		diceLine := fmt.Sprintf("🎲 d20=%d", result.D20)
+		if attackBonus != 0 {
+			if attackBonus > 0 {
+				diceLine += fmt.Sprintf(" + %d", attackBonus)
+			} else {
+				diceLine += fmt.Sprintf(" - %d", -attackBonus)
+			}
+		}
+		diceLine += fmt.Sprintf(" = %d", result.AttackRoll)
 		if result.Hit && result.RollPct > 0 {
 			diceLine += fmt.Sprintf(" → %s", pctDisplay)
 		}
@@ -200,6 +181,9 @@ var cmdDmg = &CmdItemInfo{
 						lines = append(lines, fmt.Sprintf("  克制: x%.2f", factor))
 					}
 				}
+				if result.Crit {
+					lines = append(lines, "  暴击加成: x1.5")
+				}
 				lines = append(lines, fmt.Sprintf("  最终伤害: %d", result.FinalDmg))
 			} else {
 				lines = append(lines, "  结果: 未命中")
@@ -214,6 +198,9 @@ var cmdDmg = &CmdItemInfo{
 				}
 				calcLine += fmt.Sprintf(" × %.2f修正", factor*result.StabMul)
 			}
+			if result.Crit {
+				calcLine += " × 1.5暴击"
+			}
 			calcLine += fmt.Sprintf(" = %d", result.FinalDmg)
 			lines = append(lines, calcLine)
 		}
@@ -224,6 +211,9 @@ var cmdDmg = &CmdItemInfo{
 			flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 使用了 %s 攻击自己！", attacker, atkType))
 		} else {
 			flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 对 %s 使用了 %s 攻击！", attacker, defender, atkType))
+		}
+		if result.Hit && result.FinalDmg > 0 {
+			flavorLines = append(flavorLines, fmt.Sprintf("  %s", randomBattleFlavor(result, attacker, defender)))
 		}
 
 		if !result.Hit {
@@ -259,6 +249,9 @@ var cmdDmg = &CmdItemInfo{
 							newHp = 0
 						}
 						VarSetValueInt64(ctx, "hp", newHp)
+						if newHp == 0 && curHp > 0 {
+							flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
+						}
 						pct := newHp * 10 / hpMax
 						if pct > 10 {
 							pct = 10
@@ -283,7 +276,7 @@ var cmdDmg = &CmdItemInfo{
 var cmdStab = &CmdItemInfo{
 	Name:          "stab",
 	ShortHelp:     ".stab <招式类型> // 查询自身STAB\n.stab <招式类型> @某人 // 查询他人STAB\n.stab list // 列出自身属性类型",
-	Help:          "PMDnD 本系加成(.stab):\n.stab <招式类型> // 查询自身STAB\n.stab <招式类型> @某人 // 查询他人STAB\n.stab list // 列出自身属性类型",
+	Help:          getStabHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		// 检查是否请求帮助
@@ -353,7 +346,7 @@ var cmdStab = &CmdItemInfo{
 var cmdType = &CmdItemInfo{
 	Name:      "type",
 	ShortHelp: ".type <技能类型> @<目标类型> // 查单一克制关系\n.type <技能类型> // 查该类型对所有类型的克制关系\n.type list // 列出所有类型",
-	Help:      "PMDnD 类型克制(.type):\n.type <技能类型> @<目标类型> // 查单一克制关系\n.type <技能类型> // 查该类型对所有类型的克制关系\n.type list // 列出所有类型",
+	Help:      getTypeHelp(),
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		// 检查是否请求帮助
 		if cmdArgs.IsArgEqual(1, "help") {
@@ -452,14 +445,6 @@ var cmdType = &CmdItemInfo{
 }
 
 // ---------- .暴击 / .crit 命令 ----------
-func getCritHelp() string {
-	return "PMDnD 暴击判定(.暴击 .crit):\n" +
-		".暴击 [阈值] [优势/劣势]     判定暴击，默认阈值20\n" +
-		".crit [阈值] [优势/劣势]     同.暴击\n" +
-		"  例: .crit 19               暴击阈值19\n" +
-		"  例: .crit 20 优势          d20优势，暴击阈值20"
-}
-
 var cmdCrit = &CmdItemInfo{
 	Name:      "暴击",
 	ShortHelp: ".暴击 [阈值] [优势/劣势] // 暴击判定\n.crit [阈值] [优势/劣势] // 同.暴击",

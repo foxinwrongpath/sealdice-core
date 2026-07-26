@@ -8,14 +8,7 @@ import (
 var cmdAction = &CmdItemInfo{
 	Name:      "action",
 	ShortHelp: ".action {use|bonus|reaction|rest|set} ...",
-	Help: "PMDnD 行动资源管理:\n" +
-		".action show                           查看当前行动资源\n" +
-		".action use                            消耗1个行动力\n" +
-		".action bonus                          消耗1个附赠行动\n" +
-		".action reaction                       消耗1个反应\n" +
-		".action rest                           恢复全部行动资源\n" +
-		".action set <资源> <数量>              设置资源上限（行动力/附加行动/反应）\n" +
-		"示例：.action set 行动力 2",
+	Help:          getActionHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		cmdArgs.ChopPrefixToArgsWith("use", "bonus", "reaction", "rest", "set", "show")

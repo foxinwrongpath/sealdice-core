@@ -11,7 +11,8 @@ import (
 type DamageResult struct {
 	BaseDmg    int64   // 基础伤害（未修正）
 	FinalDmg   int64   // 最终伤害（已修正）
-	D20        int64   // d20 出目
+	D20        int64   // d20 出目（原始值）
+	AttackRoll int64   // 攻击掷骰结果（d20 + 攻击加值）
 	CritText   string  // 暴击/大失败文本
 	RollPct    float64 // 攻击掷骰百分比 (0-1)
 	StabMul    float64 // STAB 倍率
@@ -265,7 +266,19 @@ func applyTerrainModifier(atkType string, state *BattleState) float64 {
 }
 
 // rollD20 掷骰并返回结果和百分比
-func rollD20(ctx *MsgContext, advantage string, ctLimit int64, hitPenalty int) (d20 int64, rollPct float64, critText string) {
+// 参数:
+//   - ctx: 上下文
+//   - advantage: "优势" 或 "劣势" 或 ""
+//   - ctLimit: 暴击阈值
+//   - attackBonus: 攻击掷骰加值（来自力量/敏捷调整值，或用户输入的 +N）
+//   - hitPenalty: 命中惩罚（来自瞌睡等状态，为负数）
+//
+// 返回:
+//   - d20: 原始骰值
+//   - attackRoll: 攻击掷骰结果（d20 + attackBonus + hitPenalty）
+//   - rollPct: 攻击掷骰百分比 (0-1)
+//   - critText: 暴击/大失败文本
+func rollD20(ctx *MsgContext, advantage string, ctLimit int64, attackBonus int64, hitPenalty int) (d20 int64, attackRoll int64, rollPct float64, critText string) {
 	d20Expr := "d20"
 	if advantage != "" {
 		d20Expr = "d20" + advantage
@@ -273,27 +286,27 @@ func rollD20(ctx *MsgContext, advantage string, ctLimit int64, hitPenalty int) (
 	ctx.CreateVmIfNotExists()
 	r := ctx.Eval(d20Expr, nil)
 	if r.vm.Error != nil {
-		return 0, 0, "骰点失败: " + r.vm.Error.Error()
+		return 0, 0, 0, "骰点失败: " + r.vm.Error.Error()
 	}
 	d, _ := r.ReadInt()
 	d20 = int64(d)
 
-	// 应用命中惩罚（瞌睡状态等）
-	// 注意：这里只处理负修正，不处理正修正
-	if hitPenalty < 0 {
-		// 将命中惩罚转换为百分比偏移
-		// 例如命中-2 相当于 d20 出目 -2
-		adjusted := d20 + int64(hitPenalty)
-		if adjusted < 1 {
-			adjusted = 1
-		}
-		if adjusted > 20 {
-			adjusted = 20
-		}
-		d20 = adjusted
+	// 计算攻击掷骰结果
+	attackRoll = d20 + attackBonus + int64(hitPenalty)
+	if attackRoll < 0 {
+		attackRoll = 0
+	}
+	if attackRoll > 100 {
+		attackRoll = 100
 	}
 
-	rollPct = float64(d20) * 0.05
+	// 计算百分比
+	rollPct = float64(attackRoll) * 0.05
+	if rollPct > 1.0 {
+		rollPct = 1.0
+	}
+
+	// 暴击判定：基于原始 d20
 	if d20 >= ctLimit {
 		rollPct += 0.5
 		critText = "【暴击+50%】"
@@ -420,8 +433,18 @@ func determineEffectText(finalDmg int64, rollPct float64, totalFactor float64, d
 // ----- 主伤害计算函数 -----
 
 // calculateDamage 计算伤害
+// 参数:
+//   - ctx: 上下文
+//   - power: 招式威力
+//   - atkType: 攻击属性
+//   - isSpecial: 是否为特殊攻击
+//   - advantage: "优势" 或 "劣势" 或 ""
+//   - ctLimit: 暴击阈值
+//   - attacker: 攻击者名称
+//   - defender: 防御者名称
+//   - attackBonus: 攻击掷骰加值（来自力量/敏捷调整值，或用户输入的 +N）
 func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial bool,
-	advantage string, ctLimit int64, attacker string, defender string) (DamageResult, string) {
+	advantage string, ctLimit int64, attacker string, defender string, attackBonus int64) (DamageResult, string) {
 
 	var result DamageResult
 
@@ -472,12 +495,13 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		}
 	}
 
-	// 10. 掷骰
-	d20, rollPct, critText := rollD20(ctx, advantage, ctLimit, hitPenalty)
+	// 10. 掷骰（传入 attackBonus）
+	d20, attackRoll, rollPct, critText := rollD20(ctx, advantage, ctLimit, attackBonus, hitPenalty)
 	if strings.HasPrefix(critText, "骰点") {
 		return result, critText
 	}
 	result.D20 = d20
+	result.AttackRoll = attackRoll
 	result.RollPct = rollPct
 	result.CritText = critText
 	result.Hit = rollPct > 0
@@ -566,8 +590,8 @@ func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage strin
 		healMod = 1.3
 	}
 
-	// 4. 掷骰
-	d20, rollPct, critText := rollD20(ctx, advantage, ctLimit, 0)
+	// 4. 治疗掷骰（治疗不受攻击加值影响，attackBonus=0）
+	d20, _, rollPct, critText := rollD20(ctx, advantage, ctLimit, 0, 0)
 	if strings.HasPrefix(critText, "骰点") {
 		return result, critText
 	}

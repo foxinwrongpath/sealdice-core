@@ -31,6 +31,7 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 			"buff":    cmdBuff,
 			"weather": cmdWeather,
 			"terrain": cmdTerrain,
+			"pmode":   cmdPmode,
 
 			// 中文别名（保留方便习惯）
 			"属性":   cmdSt,

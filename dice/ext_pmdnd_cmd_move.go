@@ -3,6 +3,7 @@ package dice
 import (
 	"fmt"
 	"math/rand"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,153 @@ import (
 )
 
 // ---------- 辅助函数 ----------
+
+// randomBattleFlavor 根据战斗结果返回随机风味文本
+func randomBattleFlavor(result DamageResult, atkName string, defName string) string {
+	critPools := []string{
+		fmt.Sprintf("💥 %s 的会心一击！", atkName),
+		fmt.Sprintf("🔥 命中要害！%s 发出了全力一击！", atkName),
+		fmt.Sprintf("⚡ 好机会！%s 击中了 %s 的弱点！", atkName, defName),
+	}
+	hitPools := []string{
+		fmt.Sprintf("👊 %s 的攻击命中了 %s！", atkName, defName),
+		fmt.Sprintf("✨ %s 的招式漂亮地击中了！", atkName),
+		fmt.Sprintf("🎯 精准的一击！%s 没有给 %s 喘息的机会！", atkName, defName),
+		fmt.Sprintf("💪 %s 的攻势凌厉！", atkName),
+	}
+	missPools := []string{
+		fmt.Sprintf("💨 %s 的攻击被 %s 躲开了……", atkName, defName),
+		fmt.Sprintf("😰 %s 的招式没有命中……", atkName),
+		fmt.Sprintf("🌀 %s 的攻击落空了！", atkName),
+	}
+	killPools := []string{
+		fmt.Sprintf("💀 %s 被彻底击倒了！", defName),
+		fmt.Sprintf("⚰️ %s 失去了战斗能力……", defName),
+		fmt.Sprintf("✴️ 决定性的 一 击！%s 倒下了！", defName),
+	}
+	superEffectivePools := []string{
+		fmt.Sprintf("💢 效果拔群！%s 发出了痛苦的声音！", defName),
+		fmt.Sprintf("💥 这一击效果绝佳！", defName),
+	}
+
+	if result.Crit && result.FinalDmg > 0 {
+		r := rand.Intn(len(critPools))
+		return critPools[r]
+	}
+	if result.FinalDmg > 0 && result.EffectText != "" {
+		r := rand.Intn(len(superEffectivePools))
+		return superEffectivePools[r]
+	}
+	if result.FinalDmg > 0 {
+		r := rand.Intn(len(hitPools))
+		return hitPools[r]
+	}
+	if result.FinalDmg == 0 && result.Hit && result.RollPct > 0 {
+		r := rand.Intn(len(killPools))
+		return killPools[r]
+	}
+	if !result.Hit {
+		r := rand.Intn(len(missPools))
+		return missPools[r]
+	}
+	return ""
+}
+
+// getPmdndDetailMode 合并局部 detail 标志和群组全局设置
+func getPmdndDetailMode(ctx *MsgContext, localDetail bool) bool {
+	if localDetail {
+		return true
+	}
+	if ctx.Group != nil {
+		if v, _ := VarGetValueInt64(ctx, "$g_pmdnd_detail"); v != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// getPmdndDebugMode 合并局部 debug 标志和群组全局设置
+func getPmdndDebugMode(ctx *MsgContext, localDebug bool) bool {
+	if localDebug {
+		return true
+	}
+	if ctx.Group != nil {
+		if v, _ := VarGetValueInt64(ctx, "$g_pmdnd_debug"); v != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// ---------- .pmode 命令 ----------
+var cmdPmode = &CmdItemInfo{
+	Name:      "pmode",
+	ShortHelp: ".pmode // 查看当前输出模式\n.pmode detail // 切换详细计算\n.pmode debug // 切换调试详情\n.pmode off // 关闭所有",
+	Help:      getPmodeHelp(),
+	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
+		if ctx.Group == nil {
+			ReplyToSender(ctx, msg, "此命令只能在群组中使用")
+			return CmdExecuteResult{Matched: true, Solved: true}
+		}
+		val := cmdArgs.GetArgN(1)
+		detailOn := false
+		debugOn := false
+
+		switch val {
+		case "", "show", "list":
+			if v, _ := VarGetValueInt64(ctx, "$g_pmdnd_detail"); v != 0 {
+				detailOn = true
+			}
+			if v, _ := VarGetValueInt64(ctx, "$g_pmdnd_debug"); v != 0 {
+				debugOn = true
+			}
+			var status string
+			if detailOn && debugOn {
+				status = "⚙️ 当前输出模式: detail + debug（显示完整计算过程）"
+			} else if debugOn {
+				status = "⚙️ 当前输出模式: debug（显示完整计算过程）"
+			} else if detailOn {
+				status = "⚙️ 当前输出模式: detail（显示简要计算公式）"
+			} else {
+				status = "⚙️ 当前输出模式: 默认（仅显示伤害结果和血条）"
+			}
+			status += "\n可用: .pmode detail / .pmode debug / .pmode off"
+			ReplyToSender(ctx, msg, status)
+
+		case "detail", "-d":
+			v, _ := VarGetValueInt64(ctx, "$g_pmdnd_detail")
+			if v != 0 {
+				VarSetValueInt64(ctx, "$g_pmdnd_detail", 0)
+				ReplyToSender(ctx, msg, "⚙️ detail 模式已关闭")
+			} else {
+				VarSetValueInt64(ctx, "$g_pmdnd_detail", 1)
+				ReplyToSender(ctx, msg, "⚙️ detail 模式已开启（显示简要计算公式）")
+			}
+
+		case "debug", "-D":
+			v, _ := VarGetValueInt64(ctx, "$g_pmdnd_debug")
+			if v != 0 {
+				VarSetValueInt64(ctx, "$g_pmdnd_debug", 0)
+				ReplyToSender(ctx, msg, "⚙️ debug 模式已关闭")
+			} else {
+				VarSetValueInt64(ctx, "$g_pmdnd_debug", 1)
+				ReplyToSender(ctx, msg, "⚙️ debug 模式已开启（显示完整计算过程，自动包含 detail）")
+			}
+
+		case "off", "clear", "clr":
+			VarSetValueInt64(ctx, "$g_pmdnd_detail", 0)
+			VarSetValueInt64(ctx, "$g_pmdnd_debug", 0)
+			ReplyToSender(ctx, msg, "⚙️ 所有全局模式已关闭")
+
+		case "help":
+			return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
+
+		default:
+			ReplyToSender(ctx, msg, "未知参数，可用: detail / debug / off / help")
+		}
+		return CmdExecuteResult{Matched: true, Solved: true}
+	},
+}
 
 // parseHitCount 解析攻击次数
 func parseHitCount(ctx *MsgContext, hitsStr string) int {
@@ -47,7 +195,8 @@ func parseHitCount(ctx *MsgContext, hitsStr string) int {
 }
 
 // parseMoveTargets 解析 .move 的目标和参数
-func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attacker string) ([]string, string, int64, bool, bool, bool) {
+// 返回: 目标列表, 优势/劣势, 暴击阈值, 是否群体模式, detail模式, debug模式, 攻击加值
+func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attacker string) ([]string, string, int64, bool, bool, bool, int64) {
 	advantage := ""
 	ctLimit := int64(20)
 	var specifiedTargets []string
@@ -55,9 +204,10 @@ func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attac
 	isGroupMode := false
 	detailMode := false
 	debugMode := false
+	attackBonus := int64(0)
 
 	if len(cmdArgs.Args) < 2 {
-		return nil, advantage, ctLimit, isGroupMode, detailMode, debugMode
+		return nil, advantage, ctLimit, isGroupMode, detailMode, debugMode, attackBonus
 	}
 	params := cmdArgs.Args[1:]
 
@@ -88,6 +238,14 @@ func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attac
 			detailMode = true
 		} else if p == "debug" || p == "-D" {
 			debugMode = true
+		} else if strings.HasPrefix(p, "+") {
+			if n, e := strconv.ParseInt(p[1:], 10, 64); e == nil {
+				attackBonus = n
+			}
+		} else if strings.HasPrefix(p, "-") {
+			if n, e := strconv.ParseInt(p[1:], 10, 64); e == nil {
+				attackBonus = -n
+			}
 		} else if n, e := strconv.ParseInt(p, 10, 64); e == nil && n >= 2 && n <= 20 {
 			ctLimit = n
 		}
@@ -147,7 +305,7 @@ func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attac
 		}
 	}
 
-	return finalTargets, advantage, ctLimit, isGroupMode, detailMode, debugMode
+	return finalTargets, advantage, ctLimit, isGroupMode, getPmdndDetailMode(ctx, detailMode), getPmdndDebugMode(ctx, debugMode), attackBonus
 }
 
 // validateMoveTargets 验证目标是否合法
@@ -351,15 +509,15 @@ func executeBuffMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 }
 
 // ---------- executeDamageMove ----------
-func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, category string, advantage string, ctLimit int64, attacker string, targets []string, remainingPP int64, hitsStr string, detailMode bool, debugMode bool) CmdExecuteResult {
+func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, category string, advantage string, ctLimit int64, attacker string, targets []string, remainingPP int64, hitsStr string, attackBonus int64, detailMode bool, debugMode bool) CmdExecuteResult {
 	if hitsStr != "" && hitsStr != "1" {
-		return executeMultiHitMove(ctx, mctx, msg, name, power, elemType, category, advantage, ctLimit, attacker, targets, remainingPP, hitsStr, detailMode, debugMode)
+		return executeMultiHitMove(ctx, mctx, msg, name, power, elemType, category, advantage, ctLimit, attacker, targets, remainingPP, hitsStr, attackBonus, detailMode, debugMode)
 	}
 
 	isSpecial := category == "特" || category == "特殊"
 	defender := targets[0]
 
-	result, errMsg := calculateDamage(mctx, power, elemType, isSpecial, advantage, ctLimit, attacker, defender)
+	result, errMsg := calculateDamage(mctx, power, elemType, isSpecial, advantage, ctLimit, attacker, defender, attackBonus)
 	if errMsg != "" {
 		ReplyToSender(mctx, msg, errMsg)
 		return CmdExecuteResult{Matched: true, Solved: true}
@@ -368,8 +526,16 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 	var lines []string
 	pctDisplay := fmt.Sprintf("%.0f%%", result.RollPct*100)
 
-	// 1. 骰子行
+	// 1. 骰子行（显示攻击掷骰过程）
 	diceLine := fmt.Sprintf("🎲 d20=%d", result.D20)
+	if attackBonus != 0 {
+		if attackBonus > 0 {
+			diceLine += fmt.Sprintf(" + %d", attackBonus)
+		} else {
+			diceLine += fmt.Sprintf(" - %d", -attackBonus)
+		}
+	}
+	diceLine += fmt.Sprintf(" = %d", result.AttackRoll)
 	if result.Hit && result.RollPct > 0 {
 		diceLine += fmt.Sprintf(" → %s", pctDisplay)
 	}
@@ -402,6 +568,9 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 					lines = append(lines, fmt.Sprintf("  克制: x%.2f", factor))
 				}
 			}
+			if result.Crit {
+				lines = append(lines, "  暴击加成: x1.5")
+			}
 			lines = append(lines, fmt.Sprintf("  最终伤害: %d", result.FinalDmg))
 		} else {
 			lines = append(lines, "  结果: 未命中")
@@ -418,6 +587,9 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 			}
 			calcLine += fmt.Sprintf(" × %.2f修正", factor*result.StabMul)
 		}
+		if result.Crit {
+			calcLine += " × 1.5暴击"
+		}
 		calcLine += fmt.Sprintf(" = %d", result.FinalDmg)
 		lines = append(lines, calcLine)
 	}
@@ -430,6 +602,7 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 	} else {
 		flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 对 %s 使用了 %s！", attackerName, defender, name))
 	}
+	flavorLines = append(flavorLines, fmt.Sprintf("  %s", randomBattleFlavor(result, attackerName, defender)))
 
 	if !result.Hit {
 		flavorLines = append(flavorLines, "  但 是 没 有 命 中……")
@@ -463,7 +636,6 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 						newHp = 0
 					}
 					VarSetValueInt64(ctx, "hp", newHp)
-					// 如果 HP 归零，触发死亡豁免提示
 					if newHp == 0 && curHp > 0 {
 						flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
 					}
@@ -487,7 +659,7 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 }
 
 // ---------- executeMultiHitMove ----------
-func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, category string, advantage string, ctLimit int64, attacker string, targets []string, remainingPP int64, hitsStr string, detailMode bool, debugMode bool) CmdExecuteResult {
+func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, power int64, elemType string, category string, advantage string, ctLimit int64, attacker string, targets []string, remainingPP int64, hitsStr string, attackBonus int64, detailMode bool, debugMode bool) CmdExecuteResult {
 	if len(targets) > 1 {
 		ReplyToSender(mctx, msg, "多段攻击暂不支持群体，请指定一个目标")
 		return CmdExecuteResult{Matched: true, Solved: true}
@@ -510,7 +682,7 @@ func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name s
 	var hitCountActual int
 
 	for i := 0; i < hitCount; i++ {
-		result, errMsg := calculateDamage(mctx, power, elemType, isSpecial, advantage, ctLimit, attacker, defender)
+		result, errMsg := calculateDamage(mctx, power, elemType, isSpecial, advantage, ctLimit, attacker, defender, attackBonus)
 		if errMsg != "" {
 			ReplyToSender(mctx, msg, errMsg)
 			return CmdExecuteResult{Matched: true, Solved: true}
@@ -528,6 +700,14 @@ func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name s
 
 		pctDisplay := fmt.Sprintf("%.0f%%", result.RollPct*100)
 		detail := fmt.Sprintf("  #%d: d20=%d", i+1, result.D20)
+		if attackBonus != 0 {
+			if attackBonus > 0 {
+				detail += fmt.Sprintf(" + %d", attackBonus)
+			} else {
+				detail += fmt.Sprintf(" - %d", -attackBonus)
+			}
+		}
+		detail += fmt.Sprintf(" = %d", result.AttackRoll)
 		if result.Hit && singleDmg > 0 {
 			if debugMode {
 				detail += fmt.Sprintf(" → %s → %d × %.2f修正 = %d", pctDisplay, result.BaseDmg, (2.0+result.TypeMod)/2.0*result.StabMul, singleDmg)
@@ -559,6 +739,12 @@ func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name s
 	flavorLines := []string{}
 	flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 对 %s 使用了 %s！",
 		getPlayerNameTempFunc(mctx), defender, name))
+	if hitCountActual > 0 {
+		flavorLines = append(flavorLines, fmt.Sprintf("  %s", randomBattleFlavor(DamageResult{
+			Crit: critCount > 0, Hit: hitCountActual > 0, FinalDmg: totalDmg,
+			RollPct: 1.0, EffectText: "",
+		}, getPlayerNameTempFunc(mctx), defender)))
+	}
 	flavorLines = append(flavorLines, fmt.Sprintf("  攻击 %d 次，命中 %d 次！", hitCount, hitCountActual))
 	if critCount > 0 {
 		flavorLines = append(flavorLines, fmt.Sprintf("  其中 %d 次暴击！", critCount))
@@ -582,7 +768,6 @@ func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name s
 				newHp = 0
 			}
 			VarSetValueInt64(ctx, "hp", newHp)
-			// 如果 HP 归零，触发死亡豁免提示
 			if newHp == 0 && curHp > 0 {
 				flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
 			}
@@ -606,43 +791,8 @@ func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name s
 // ---------- cmdMove ----------
 var cmdMove = &CmdItemInfo{
 	Name:      "move",
-	ShortHelp: ".move // 查看招式列表\n.move add ...\n.move <招式名> [@目标] [优势/劣势] [暴击阈值] [detail] [debug]",
-	Help: "PMDnD 招式管理(.move):\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		".move                           查看招式列表\n" +
-		".move add <名称> <威力> <类型> <环位> <类别> [效果1] [效果2] ...\n" +
-		"  类别: 物/特/治疗/强化\n" +
-		"  强化效果格式: <属性>:<变化值>  例: 物攻:+2\n" +
-		"  多段攻击格式: hits:2-5\n" +
-		"  例: .move add 种子机关枪 25 草 1 物 hits:2-5\n" +
-		".move del <名称>                 删除招式\n" +
-		".move use <名称>                 非战斗使用（仅消耗PP）\n" +
-		".move clr                        清除所有招式\n" +
-		"\n" +
-		"⚔️ 使用招式:\n" +
-		"  .move <招式名> [@目标] [优势/劣势] [暴击阈值] [detail] [debug]\n" +
-		"\n" +
-		"🎯 目标选取规则:\n" +
-		"  · 伤害招式: 不指定目标时自动从先攻列表选取第一个非己单位\n" +
-		"  · 治疗/强化: 不指定目标时默认对自己使用\n" +
-		"  · 可使用 @目标 指定任意目标\n" +
-		"  · 使用 @enemies / @allies / @others / @all 指定群体\n" +
-		"\n" +
-		"📝 示例:\n" +
-		"  .move 喷射火焰 @圈圈熊 优势 19          # 常规攻击\n" +
-		"  .move 喷射火焰 @圈圈熊 detail            # 显示简要计算\n" +
-		"  .move 喷射火焰 @圈圈熊 debug             # 显示完整计算\n" +
-		"  .move 治愈波动                          # 默认治疗自己\n" +
-		"  .move 种子机关枪 @圈圈熊                # 多段攻击\n" +
-		"\n" +
-		"📋 类别说明:\n" +
-		"  物: 物理攻击  特: 特殊攻击  治疗: 恢复HP  强化: 提升能力\n" +
-		"\n" +
-		"💡 使用 .buff stat 查看当前战斗状态\n" +
-		"💡 PP消耗 = 环位 × 30，从角色总PP中扣除\n" +
-		"💡 当 NPC HP 归零时自动从先攻列表移除\n" +
-		"💡 当玩家 HP 归零时自动提示使用 .ds 进行濒死豁免\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+	ShortHelp: ".move // 查看招式列表\n.move add ...\n.move <招式名>[+N/-N] [@目标] [优势/劣势] [暴击阈值] [detail] [debug]",
+	Help:          getMoveHelp(),
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		cmdArgs.ChopPrefixToArgsWith("add", "del", "clr", "clear", "use")
@@ -837,12 +987,30 @@ var cmdMove = &CmdItemInfo{
 			}
 
 			key := "$move_" + name
-			val, exists := attrs.LoadX(key)
-			if !exists || val.TypeId != ds.VMTypeDict {
+			moveVal, exists := attrs.LoadX(key)
+			suffixBonus := int64(0)
+
+			// 支持 "撞击+2" 这种将加值拼在招式名后面的写法
+			if !exists || moveVal.TypeId != ds.VMTypeDict {
+				re := regexp.MustCompile(`^(.+?)([+-]\d+)$`)
+				if m := re.FindStringSubmatch(name); m != nil {
+					strippedName := m[1]
+					if n, err := strconv.ParseInt(m[2], 10, 64); err == nil {
+						key = "$move_" + strippedName
+						moveVal, exists = attrs.LoadX(key)
+						if exists && moveVal.TypeId == ds.VMTypeDict {
+							suffixBonus = n
+							name = strippedName
+						}
+					}
+				}
+			}
+
+			if !exists || moveVal.TypeId != ds.VMTypeDict {
 				ReplyToSender(mctx, msg, fmt.Sprintf("未找到招式: %s，请使用 .move add 添加", name))
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
-			dd := val.MustReadDictData()
+			dd := moveVal.MustReadDictData()
 
 			powerV, _ := dd.Dict.Load("power")
 			power, _ := powerV.ReadInt()
@@ -874,7 +1042,8 @@ var cmdMove = &CmdItemInfo{
 
 			// ---- 解析目标和参数 ----
 			attacker := mctx.Player.Name
-			targets, advantage, ctLimit, isGroupMode, detailMode, debugMode := parseMoveTargets(ctx, mctx, cmdArgs, attacker)
+			targets, advantage, ctLimit, isGroupMode, detailMode, debugMode, attackBonus := parseMoveTargets(ctx, mctx, cmdArgs, attacker)
+			attackBonus += suffixBonus
 			categoryLower := strings.ToLower(category)
 
 			if ok, errMsg := validateMoveTargets(categoryLower, targets, attacker, isGroupMode); !ok {
@@ -912,7 +1081,7 @@ var cmdMove = &CmdItemInfo{
 			}
 
 			// 默认：伤害
-			return executeDamageMove(ctx, mctx, msg, name, int64(power), elemType, category, advantage, ctLimit, attacker, targets, newPP, hitsStr, detailMode, debugMode)
+			return executeDamageMove(ctx, mctx, msg, name, int64(power), elemType, category, advantage, ctLimit, attacker, targets, newPP, hitsStr, attackBonus, detailMode, debugMode)
 		}
 		return CmdExecuteResult{Matched: true, Solved: true}
 	},

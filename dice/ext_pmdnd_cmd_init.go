@@ -17,18 +17,7 @@ var cmdInit = &CmdItemInfo{
 		".init clear/clr // 清除先攻列表（同时重置能力等级）\n" +
 		".init end/ed/next // 结束一回合（同时结算状态）\n" +
 		".init help // 显示帮助",
-	Help: ".init // 查看先攻列表\n" +
-		".init del <单位1> <单位2> ... // 从先攻列表中删除\n" +
-		".init set <单位名称> <先攻表达式> // 设置单位的先攻\n" +
-		".init clear/clr // 清除先攻列表，并重置所有目标的能力变化等级（物攻+2等）\n" +
-		"   💡 累积型状态（灼伤、中毒等）不会被清除，需要治疗\n" +
-		".init end/ed/next // 结束当前回合，进入下一回合（同时自动结算状态）\n" +
-		".init help // 显示帮助\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"💡 相关命令:\n" +
-		"  .buff stat          查看当前状态\n" +
-		"  .buff reset         仅重置能力等级\n" +
-		"  .buff clear all     清除所有状态（包括累积型状态）",
+	Help: getInitHelp(),
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		// 如果命令是 .ri，自动转换成 .init add
 		if cmdArgs.Command == "ri" {
