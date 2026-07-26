@@ -37,7 +37,7 @@ func randomBattleFlavor(result DamageResult, atkName string, defName string) str
 	}
 	superEffectivePools := []string{
 		fmt.Sprintf("💢 效果拔群！%s 发出了痛苦的声音！", defName),
-		fmt.Sprintf("💥 这一击效果绝佳！", defName),
+		"💥 这一击效果绝佳！",
 	}
 
 	if result.Crit && result.FinalDmg > 0 {
@@ -559,6 +559,12 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 		flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 对 %s 使用了 %s！", attackerName, defender, name))
 	}
 	flavorLines = append(flavorLines, fmt.Sprintf("  %s", randomBattleFlavor(result, attackerName, defender)))
+	if result.EnvText != "" {
+		flavorLines = append(flavorLines, fmt.Sprintf("  %s", result.EnvText))
+	}
+	if result.StateText != "" {
+		flavorLines = append(flavorLines, fmt.Sprintf("  %s", result.StateText))
+	}
 
 	if !result.Hit {
 		flavorLines = append(flavorLines, "  但 是 没 有 命 中……")

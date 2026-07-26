@@ -383,6 +383,8 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 		var totalDmg int64
 		var critCount int
 		var hitCountActual int
+		var lastEnvText string
+		var lastStateText string
 
 		for i := 0; i < hitCount; i++ {
 			result, errMsg := calculateDamage(ctx, power, elemType, isSpecial, advantage, ctLimit, attacker, target, attackBonus)
@@ -390,6 +392,9 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 				ReplyToSender(ctx, msg, errMsg)
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
+
+			lastEnvText = result.EnvText
+			lastStateText = result.StateText
 
 			if result.Hit && result.FinalDmg > 0 {
 				hitCountActual++
@@ -441,6 +446,12 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 				Crit: critCount > 0, Hit: true, FinalDmg: totalDmg,
 				RollPct: 1.0, EffectText: "",
 			}, npcName, target)))
+		}
+		if lastEnvText != "" {
+			flavorLines = append(flavorLines, fmt.Sprintf("  %s", lastEnvText))
+		}
+		if lastStateText != "" {
+			flavorLines = append(flavorLines, fmt.Sprintf("  %s", lastStateText))
 		}
 		flavorLines = append(flavorLines, fmt.Sprintf("  攻击 %d 次，命中 %d 次！", hitCount, hitCountActual))
 		if critCount > 0 {
@@ -577,6 +588,15 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 	// 3. 战斗演说
 	flavorLines := []string{}
 	flavorLines = append(flavorLines, fmt.Sprintf("⚔️ %s 对 %s 使用了 %s！", npcName, target, moveName))
+	if result.Hit && result.FinalDmg > 0 {
+		flavorLines = append(flavorLines, fmt.Sprintf("  %s", randomBattleFlavor(result, npcName, target)))
+	}
+	if result.EnvText != "" {
+		flavorLines = append(flavorLines, fmt.Sprintf("  %s", result.EnvText))
+	}
+	if result.StateText != "" {
+		flavorLines = append(flavorLines, fmt.Sprintf("  %s", result.StateText))
+	}
 
 	if !result.Hit {
 		flavorLines = append(flavorLines, "  但 是 没 有 命 中……")

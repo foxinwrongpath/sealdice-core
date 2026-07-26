@@ -18,6 +18,8 @@ type DamageResult struct {
 	StabMul    float64 // STAB 倍率
 	TypeMod    float64 // 属性克制修正
 	EffectText string  // 效果文本（"效果拔群！"等）
+	EnvText    string  // 环境播报（天气/场地提示）
+	StateText  string  // 状态播报（灼伤削弱攻击等）
 	Hit        bool    // 是否命中
 	Crit       bool    // 是否暴击
 	Attacker   string  // 攻击者名称
@@ -631,7 +633,54 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 	result.EffectText = determineEffectText(finalDmg, rollPct, totalFactor, defender)
 
+	// 环境与状态播报
+	result.EnvText = genEnvNotifications(state, atkType, isSpecial, weatherMod, terrainMod)
+	result.StateText = genStateNotifications(attackerState, defState, isSpecial)
+
 	return result, ""
+}
+
+// genEnvNotifications 生成天气/场地播报文本
+func genEnvNotifications(state *BattleState, atkType string, isSpecial bool, weatherMod, terrainMod float64) string {
+	if state == nil {
+		return ""
+	}
+	var msgs []string
+	if state.Weather != "" && weatherMod != 1.0 {
+		msgs = append(msgs, fmt.Sprintf("☀️ %s让%s属性招式威力×%.1f！", state.Weather, atkType, weatherMod))
+	}
+	if state.Terrain != "" && terrainMod != 1.0 {
+		msgs = append(msgs, fmt.Sprintf("🏟️ %s让%s属性招式威力×%.1f！", state.Terrain, atkType, terrainMod))
+	}
+	if isSpecial && state.LightScreen > 0 {
+		msgs = append(msgs, fmt.Sprintf("🛡️ 光墙削弱了特殊攻击！"))
+	}
+	if !isSpecial && state.ReflectWall > 0 {
+		msgs = append(msgs, fmt.Sprintf("🛡️ 反射壁削弱了物理攻击！"))
+	}
+	return strings.Join(msgs, "\n  ")
+}
+
+// genStateNotifications 生成状态播报文本
+func genStateNotifications(attState, defState *BattleState, isSpecial bool) string {
+	var msgs []string
+	if attState != nil {
+		if v, ok := attState.Cumulative["灼伤"]; ok && v > 0 && !isSpecial {
+			msgs = append(msgs, fmt.Sprintf("🔥 灼伤%d层削弱了物攻！", v))
+		}
+		if v, ok := attState.Cumulative["冻伤"]; ok && v > 0 && isSpecial {
+			msgs = append(msgs, fmt.Sprintf("❄️ 冻伤%d层削弱了特攻！", v))
+		}
+	}
+	if defState != nil {
+		if v, ok := defState.Cumulative["溶解"]; ok && v > 0 && !isSpecial {
+			msgs = append(msgs, fmt.Sprintf("🫠 溶解%d层降低了物防！", v))
+		}
+		if v, ok := defState.Cumulative["破防"]; ok && v > 0 && isSpecial {
+			msgs = append(msgs, fmt.Sprintf("💔 破防%d层降低了特防！", v))
+		}
+	}
+	return strings.Join(msgs, "\n  ")
 }
 
 // ----- 治疗计算函数 -----

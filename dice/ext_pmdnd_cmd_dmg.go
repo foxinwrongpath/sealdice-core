@@ -215,6 +215,12 @@ var cmdDmg = &CmdItemInfo{
 		if result.Hit && result.FinalDmg > 0 {
 			flavorLines = append(flavorLines, fmt.Sprintf("  %s", randomBattleFlavor(result, attacker, defender)))
 		}
+		if result.EnvText != "" {
+			flavorLines = append(flavorLines, fmt.Sprintf("  %s", result.EnvText))
+		}
+		if result.StateText != "" {
+			flavorLines = append(flavorLines, fmt.Sprintf("  %s", result.StateText))
+		}
 
 		if !result.Hit {
 			flavorLines = append(flavorLines, "  但 是 没 有 命 中……")

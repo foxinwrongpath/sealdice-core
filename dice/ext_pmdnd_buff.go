@@ -584,6 +584,41 @@ func stateToString(state *BattleState) string {
 	return strings.Join(parts, "  ")
 }
 
+// getBuffStateHelp 返回指定状态的效果描述
+func getBuffStateHelp(name string) string {
+	if effect, ok := StateEffects[name]; ok {
+		dmgText := ""
+		if effect.DamagePerLayer > 0 {
+			dmgText = fmt.Sprintf("\n  回合开始受到 %d 威力状态伤害/层", effect.DamagePerLayer)
+		}
+		statText := ""
+		if lv, ok := StateChangeLevels[name]; ok {
+			statText = fmt.Sprintf("\n  变化等级 %d", lv)
+		}
+		severeText := ""
+		if s, ok := SevereStateMap[name]; ok {
+			severeText = fmt.Sprintf("\n  20层 → %s", s)
+		}
+		return fmt.Sprintf("📋 %s:\n  %s%s%s%s", name, effect.Desc, statText, dmgText, severeText)
+	}
+	if mods, ok := VulnStateTypeMods[name]; ok {
+		var parts []string
+		for t, v := range mods {
+			sign := "+"
+			if v < 0 {
+				sign = ""
+			}
+			parts = append(parts, fmt.Sprintf("%s%s%.1f", t, sign, v))
+		}
+		severeText := ""
+		if s, ok := SevereStateMap[name]; ok {
+			severeText = fmt.Sprintf("\n  20层 → %s", s)
+		}
+		return fmt.Sprintf("📋 %s (易伤类):\n  属性修正: %s%s\n  每回合减少1层", name, strings.Join(parts, " "), severeText)
+	}
+	return fmt.Sprintf("❌ 未知状态: %s\n  可用: .buff help 查看全部", name)
+}
+
 // ---------- .buff 命令 ----------
 
 var cmdBuff = &CmdItemInfo{
@@ -756,7 +791,12 @@ var cmdBuff = &CmdItemInfo{
 			ReplyToSender(ctx, msg, "📊 能力变化等级已重置（战斗结束）\n💡 累积型状态（灼伤、中毒等）仍然存在，请根据需要治疗")
 			return CmdExecuteResult{Matched: true, Solved: true}
 
-		case "help", "":
+		case "help":
+			arg2 := cmdArgs.GetArgN(2)
+			if arg2 != "" {
+				ReplyToSender(ctx, msg, getBuffStateHelp(arg2))
+				return CmdExecuteResult{Matched: true, Solved: true}
+			}
 			return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
 
 		default:
