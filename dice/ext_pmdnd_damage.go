@@ -635,7 +635,16 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	// 14. 应用结界减伤
 	finalDmg = applyBarrierReduction(state, isSpecial, finalDmg)
 
-	// 15. 防御者保护/替身
+	// 15. 回避减伤：防御者的敏捷调整值直接减免伤害（规则书第271行）
+	evasionDR := getDefenderEvasionDR(ctx, defender)
+	if finalDmg > 0 && evasionDR > 0 {
+		finalDmg -= evasionDR
+		if finalDmg < 1 {
+			finalDmg = 1
+		}
+	}
+
+	// 16. 防御者保护/替身
 	if defState.Protect > 0 {
 		finalDmg = 0
 		result.EffectText = defender + " 被保护了！"
@@ -740,6 +749,28 @@ func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage strin
 	result.FinalHeal = finalHeal
 
 	return result, ""
+}
+
+// getDefenderEvasionDR 获取防御者的回避减伤（敏捷调整值）
+// 规则书第271行：回避获得等于敏捷调整值的加值，影响受到的所有攻击效应的伤害
+func getDefenderEvasionDR(ctx *MsgContext, defender string) int64 {
+	dex := int64(0)
+	if val := getNPCAttr(ctx, defender, "敏捷"); val > 0 {
+		dex = val
+	} else if defender == ctx.Player.Name {
+		if v, _ := VarGetValueInt64(ctx, "敏捷"); v > 0 {
+			dex = v
+		}
+	}
+	if dex <= 10 {
+		return 0
+	}
+	// 敏捷调整值 = floor((敏捷 - 10) / 2)，朝负无穷取整
+	mod := (dex - 10) / 2
+	if mod < 0 {
+		mod = 0
+	}
+	return mod
 }
 
 // ----- 死亡豁免函数 -----

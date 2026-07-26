@@ -16,6 +16,10 @@ var cmdPmdnd = &CmdItemInfo{
 			ReplyToSender(ctx, msg, getPmdndHelp())
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
+		if cmdArgs.IsArgEqual(1, "guide") || cmdArgs.IsArgEqual(1, "快速开始") {
+			ReplyToSender(ctx, msg, getQuickstartHelp())
+			return CmdExecuteResult{Matched: true, Solved: true}
+		}
 
 		isMode2 := cmdArgs.Command == "pmdndx"
 		n := cmdArgs.GetArgN(1)

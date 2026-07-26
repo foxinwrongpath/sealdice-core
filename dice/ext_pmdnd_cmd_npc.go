@@ -889,8 +889,9 @@ var cmdNPC = &CmdItemInfo{
 			props := data[npcName]
 			var lines []string
 			lines = append(lines, fmt.Sprintf("NPC %s 属性:", npcName))
-			// 按固定顺序显示
-			order := []string{"patk", "pdef", "satk", "sdef", "spd", "hp", "hpmax", "cr"}
+			// 按固定顺序显示：战斗属性 → 六项属性 → 其他
+			order := []string{"hp", "hpmax", "patk", "pdef", "satk", "sdef", "spd", "cr",
+				"力量", "敏捷", "体质", "智力", "感知", "魅力", "pp"}
 			for _, key := range order {
 				if v, ok := props[key]; ok {
 					if key == "hp" {

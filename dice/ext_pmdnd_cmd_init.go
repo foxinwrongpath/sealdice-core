@@ -2,6 +2,7 @@ package dice
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,11 +13,12 @@ import (
 var cmdInit = &CmdItemInfo{
 	Name: "init",
 	ShortHelp: ".init // 查看先攻列表\n" +
-		".init del <单位1> <单位2> ... // 从先攻列表中删除\n" +
-		".init set <单位名称> <先攻表达式> // 设置单位的先攻\n" +
-		".init clear/clr // 清除先攻列表（同时重置能力等级）\n" +
-		".init end/ed/next // 结束一回合（同时结算状态）\n" +
-		".init help // 显示帮助",
+		".ri <名> [d20表达式]  // 快捷添加 (d20)\n" +
+		".pmi <名>            // 快捷添加 (PMDnD公式: d10+敏捷+速度因子)\n" +
+		".init del <单位1> ... // 从先攻列表中删除\n" +
+		".init set <单位> <表达式> // 设置单位的先攻\n" +
+		".init clear // 清除先攻列表\n" +
+		".init end   // 结束一回合",
 	Help: getInitHelp(),
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		// 如果命令是 .ri，自动转换成 .init add
@@ -69,22 +71,41 @@ var cmdInit = &CmdItemInfo{
 			var name string
 			var val int64
 
-			// 尝试解析第一个参数是否为数字
-			if num, err := strconv.ParseInt(args[0], 10, 64); err == nil {
-				val = num
-				if len(args) > 1 {
-					name = args[1]
-				} else {
-					name = ctx.Player.Name
+			// PMDnD 先攻公式: .pmi / .ri =PMD
+			usePMDnDFormula := cmdArgs.Command == "pmi"
+			isPMDnDFormula := false
+
+			// 尝试解析第一个参数是否为数字，除非是 PMDnD 公式
+			if !usePMDnDFormula {
+				if num, err := strconv.ParseInt(args[0], 10, 64); err == nil {
+					val = num
+					if len(args) > 1 {
+						name = args[1]
+					} else {
+						name = ctx.Player.Name
+					}
 				}
-			} else {
+			}
+
+			if name == "" {
 				name = args[0]
-				if len(args) > 1 {
+				if len(args) > 1 && !usePMDnDFormula {
 					if num2, err := strconv.ParseInt(args[1], 10, 64); err == nil {
 						val = num2
 					} else {
 						val = int64(ds.Roll(nil, 20, 0))
 					}
+				} else if usePMDnDFormula {
+					// PMDnD 公式: d10 + floor(敏捷 + log₁.₂(spd))
+					dex, spd := getPMDnDInitiativeStats(ctx, name)
+					speedFactor := 0.0
+					if spd > 1 {
+						speedFactor = math.Log(float64(spd)) / math.Log(1.2)
+					}
+					baseInit := int64(math.Floor(float64(dex) + speedFactor))
+					d10 := int64(ds.Roll(nil, 10, 0))
+					val = baseInit + d10
+					isPMDnDFormula = true
 				} else {
 					val = int64(ds.Roll(nil, 20, 0))
 				}
@@ -107,7 +128,12 @@ var cmdInit = &CmdItemInfo{
 			riList = append(riList, &RIListItem{name: name, val: val, detail: "", uid: ""})
 			sort.Sort(riList)
 			riList.SaveToGroup(ctx)
-			ReplyToSender(ctx, msg, fmt.Sprintf("✅ 添加先攻: %s = %d", name, val))
+			if isPMDnDFormula {
+				dex2, spd2 := getPMDnDInitiativeStats(ctx, name)
+				ReplyToSender(ctx, msg, fmt.Sprintf("✅ 添加先攻(PMDnD): %s = %d (敏捷%d + log₁.₂(spd%d) → d10)", name, val, dex2, spd2))
+			} else {
+				ReplyToSender(ctx, msg, fmt.Sprintf("✅ 添加先攻: %s = %d", name, val))
+			}
 
 		case "del":
 			name := cmdArgs.GetArgN(2)
@@ -226,4 +252,39 @@ var cmdRi = &CmdItemInfo{
 	},
 }
 
-//todo: 1.先攻列表内倒下的宝可梦应自动被清空状态并移除
+// .pmi 快捷指令 — PMDnD 先攻公式
+var cmdPmi = &CmdItemInfo{
+	Name: "pmi",
+	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
+		cmdArgs.Command = "pmi"
+		return cmdInit.Solve(ctx, msg, cmdArgs)
+	},
+}
+
+// getPMDnDInitiativeStats 读取角色/NPC 的敏捷和速度属性值
+func getPMDnDInitiativeStats(ctx *MsgContext, name string) (dex int64, spd int64) {
+	dex = int64(10)
+	spd = int64(10)
+	if val := getNPCAttr(ctx, name, "敏捷"); val > 0 {
+		dex = val
+	} else if name == ctx.Player.Name {
+		if v, _ := VarGetValueInt64(ctx, "敏捷"); v > 0 {
+			dex = v
+		}
+	}
+	if val := getNPCAttr(ctx, name, "spd"); val > 0 {
+		spd = val
+	} else if val := getNPCAttr(ctx, name, "速度"); val > 0 {
+		spd = val
+	} else if name == ctx.Player.Name {
+		if v, _ := VarGetValueInt64(ctx, "spd"); v > 0 {
+			spd = v
+		}
+		if spd == 0 {
+			if v, _ := VarGetValueInt64(ctx, "速度"); v > 0 {
+				spd = v
+			}
+		}
+	}
+	return
+}

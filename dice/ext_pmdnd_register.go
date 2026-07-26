@@ -24,6 +24,7 @@ func RegisterBuiltinExtPmdnd(self *Dice) {
 			"type":    cmdType,
 			"crit":    cmdCrit,
 			"init":    cmdInit,
+			"pmi":     cmdPmi,
 			"npc":     cmdNPC,
 			"ds":      cmdDs,
 			"buff":    cmdBuff,
