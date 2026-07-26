@@ -21,12 +21,13 @@ var cmdInit = &CmdItemInfo{
 		".init end   // 结束一回合",
 	Help: getInitHelp(),
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
-		// 如果命令是 .ri，自动转换成 .init add
-		if cmdArgs.Command == "ri" {
-			// 构造新的参数列表，把参数放在 add 后面
-			newArgs := []string{"add"}
-			newArgs = append(newArgs, cmdArgs.Args...)
-			cmdArgs.Args = newArgs
+		// .ri / .pmi 快捷添加先攻，跳过前缀解析防止 RawArgs 空切片崩溃
+		if cmdArgs.Command == "ri" || cmdArgs.Command == "pmi" {
+			args := cmdArgs.Args
+			if len(args) == 0 {
+				args = []string{ctx.Player.Name}
+			}
+			return handleInitAdd(ctx, msg, cmdArgs, args, cmdArgs.Command == "pmi")
 		}
 		cmdArgs.ChopPrefixToArgsWith("add", "list", "del", "set", "next", "clear", "clr")
 		sub := cmdArgs.GetArgN(1)
@@ -63,77 +64,7 @@ var cmdInit = &CmdItemInfo{
 			ReplyToSender(ctx, msg, textOut.String())
 
 		case "add":
-			args := cmdArgs.Args[1:]
-			if len(args) == 0 {
-				return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
-			}
-
-			var name string
-			var val int64
-
-			// PMDnD 先攻公式: .pmi / .ri =PMD
-			usePMDnDFormula := cmdArgs.Command == "pmi"
-			isPMDnDFormula := false
-
-			// 尝试解析第一个参数是否为数字，除非是 PMDnD 公式
-			if !usePMDnDFormula {
-				if num, err := strconv.ParseInt(args[0], 10, 64); err == nil {
-					val = num
-					if len(args) > 1 {
-						name = args[1]
-					} else {
-						name = ctx.Player.Name
-					}
-				}
-			}
-
-			if name == "" {
-				name = args[0]
-				if len(args) > 1 && !usePMDnDFormula {
-					if num2, err := strconv.ParseInt(args[1], 10, 64); err == nil {
-						val = num2
-					} else {
-						val = int64(ds.Roll(nil, 20, 0))
-					}
-				} else if usePMDnDFormula {
-					// PMDnD 公式: d10 + floor(敏捷 + log₁.₂(spd))
-					dex, spd := getPMDnDInitiativeStats(ctx, name)
-					speedFactor := 0.0
-					if spd > 1 {
-						speedFactor = math.Log(float64(spd)) / math.Log(1.2)
-					}
-					baseInit := int64(math.Floor(float64(dex) + speedFactor))
-					d10 := int64(ds.Roll(nil, 10, 0))
-					val = baseInit + d10
-					isPMDnDFormula = true
-				} else {
-					val = int64(ds.Roll(nil, 20, 0))
-				}
-			}
-
-			// 验证名称是否存在
-			isPlayer := name == ctx.Player.Name
-			npcData := loadNPCData(ctx)
-			_, isNPC := npcData[name]
-
-			if !isPlayer && !isNPC {
-				ReplyToSender(ctx, msg, fmt.Sprintf("❌ %s 不存在，请先创建:\n  冒险者: 无需创建，直接使用\n  NPC: .npc new %s", name, name))
-				return CmdExecuteResult{Matched: true, Solved: true}
-			}
-
-			riList := (RIList{}).LoadByCurGroup(ctx)
-			if len(riList) == 0 {
-				VarSetValueInt64(ctx, "$g当前回合先攻值", NULL_INIT_VAL)
-			}
-			riList = append(riList, &RIListItem{name: name, val: val, detail: "", uid: ""})
-			sort.Sort(riList)
-			riList.SaveToGroup(ctx)
-			if isPMDnDFormula {
-				dex2, spd2 := getPMDnDInitiativeStats(ctx, name)
-				ReplyToSender(ctx, msg, fmt.Sprintf("✅ 添加先攻(PMDnD): %s = %d (敏捷%d + log₁.₂(spd%d) → d10)", name, val, dex2, spd2))
-			} else {
-				ReplyToSender(ctx, msg, fmt.Sprintf("✅ 添加先攻: %s = %d", name, val))
-			}
+			return handleInitAdd(ctx, msg, cmdArgs, cmdArgs.Args[1:], false)
 
 		case "del":
 			name := cmdArgs.GetArgN(2)
@@ -239,6 +170,101 @@ var cmdInit = &CmdItemInfo{
 		}
 		return CmdExecuteResult{Matched: true, Solved: true}
 	},
+}
+
+// handleInitAdd 处理 .init add / .ri / .pmi 的先攻添加逻辑
+func handleInitAdd(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs, args []string, usePMDnDFormula bool) CmdExecuteResult {
+	if len(args) == 0 {
+		return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
+	}
+
+	var name string
+	var val int64
+	isPMDnDFormula := false
+
+	if !usePMDnDFormula {
+		if num, err := strconv.ParseInt(args[0], 10, 64); err == nil {
+			val = num
+			if len(args) > 1 {
+				name = args[1]
+			} else {
+				name = ctx.Player.Name
+			}
+		}
+	}
+
+	if name == "" {
+		name = args[0]
+		if len(args) > 1 && !usePMDnDFormula {
+			if num2, err := strconv.ParseInt(args[1], 10, 64); err == nil {
+				val = num2
+			} else {
+				val = int64(ds.Roll(nil, 20, 0))
+			}
+		} else if usePMDnDFormula {
+			dex, spd := getPMDnDInitiativeStats(ctx, name)
+			speedFactor := 0.0
+			if spd > 1 {
+				speedFactor = math.Log(float64(spd)) / math.Log(1.2)
+			}
+			baseInit := int64(math.Floor(float64(dex) + speedFactor))
+			d10 := int64(ds.Roll(nil, 10, 0))
+			val = baseInit + d10
+			isPMDnDFormula = true
+		} else {
+			val = int64(ds.Roll(nil, 20, 0))
+		}
+	}
+
+	isPlayer := name == ctx.Player.Name
+	isNPC := false
+	if ctx.Group != nil {
+		npcData := loadNPCData(ctx)
+		_, isNPC = npcData[name]
+	}
+
+	if !isPlayer && !isNPC {
+		if ctx.Group == nil {
+			ReplyToSender(ctx, msg, "❌ 私聊中只能为自己添加先攻\n  用法: .ri 或 .pmi (不指定名称则默认为自己)")
+		} else {
+			ReplyToSender(ctx, msg, fmt.Sprintf("❌ %s 不存在，请先创建:\n  冒险者: 无需创建，直接使用\n  NPC: .npc new %s", name, name))
+		}
+		return CmdExecuteResult{Matched: true, Solved: true}
+	}
+
+	riList := (RIList{}).LoadByCurGroup(ctx)
+	if len(riList) == 0 {
+		VarSetValueInt64(ctx, "$g当前回合先攻值", NULL_INIT_VAL)
+	}
+	// 检查是否已存在，存在则更新值
+	found := false
+	for _, item := range riList {
+		if item.name == name {
+			item.val = val
+			found = true
+			break
+		}
+	}
+	if !found {
+		riList = append(riList, &RIListItem{name: name, val: val, detail: "", uid: ""})
+	}
+	sort.Sort(riList)
+	riList.SaveToGroup(ctx)
+	if isPMDnDFormula {
+		dex2, spd2 := getPMDnDInitiativeStats(ctx, name)
+		if found {
+			ReplyToSender(ctx, msg, fmt.Sprintf("🔄 更新先攻(PMDnD): %s = %d (敏捷%d + log₁.₂(spd%d) → d10)", name, val, dex2, spd2))
+		} else {
+			ReplyToSender(ctx, msg, fmt.Sprintf("✅ 添加先攻(PMDnD): %s = %d (敏捷%d + log₁.₂(spd%d) → d10)", name, val, dex2, spd2))
+		}
+	} else {
+		if found {
+			ReplyToSender(ctx, msg, fmt.Sprintf("🔄 更新先攻: %s = %d", name, val))
+		} else {
+			ReplyToSender(ctx, msg, fmt.Sprintf("✅ 添加先攻: %s = %d", name, val))
+		}
+	}
+	return CmdExecuteResult{Matched: true, Solved: true}
 }
 
 // .ri 快捷指令

@@ -447,17 +447,8 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 			flavorLines = append(flavorLines, fmt.Sprintf("  其中 %d 次暴击！", critCount))
 		}
 
-		if newHp, maxHp, ok := updateNPCHP(ctx, target, totalDmg); ok && maxHp > 0 {
-			pct := newHp * 10 / maxHp
-			if pct > 10 {
-				pct = 10
-			}
-			if pct < 0 {
-				pct = 0
-			}
-			bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
-			flavorLines = append(flavorLines, fmt.Sprintf("  📊 HP: %s %d/%d", bar, newHp, maxHp))
-		} else if target == ctx.Player.Name {
+		if target == ctx.Player.Name {
+			if hpMax, exists := VarGetValueInt64(ctx, "hpmax"); exists && hpMax > 0 {
 			if hpMax, exists := VarGetValueInt64(ctx, "hpmax"); exists && hpMax > 0 {
 				curHp, _ := VarGetValueInt64(ctx, "hp")
 				newHp := curHp - totalDmg
@@ -487,7 +478,7 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 				} else {
 					VarSetValueInt64(ctx, "hp", newHp)
 					if newHp == 0 && curHp > 0 {
-						triggerDeathSave(ctx, target)
+						flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
 					}
 				}
 				pct := newHp * 10 / hpMax
@@ -500,7 +491,14 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 				bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
 				flavorLines = append(flavorLines, fmt.Sprintf("  📊 HP: %s %d/%d", bar, newHp, hpMax))
 			}
+		} else if newHp, maxHp, ok := updateNPCHP(ctx, target, totalDmg); ok && maxHp > 0 {
+			pct := newHp * 10 / maxHp
+			if pct > 10 { pct = 10 }
+			if pct < 0 { pct = 0 }
+			bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
+			flavorLines = append(flavorLines, fmt.Sprintf("  📊 HP: %s %d/%d", bar, newHp, maxHp))
 		}
+	}
 
 		fullText := strings.Join(lines, "\n") + "\n" + strings.Join(flavorLines, "\n")
 		ReplyToSender(ctx, msg, fullText)
@@ -594,17 +592,7 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 		} else {
 			flavorLines = append(flavorLines, fmt.Sprintf("  %s 受到了 %d 点伤害！", target, result.FinalDmg))
 
-			if newHp, maxHp, ok := updateNPCHP(ctx, target, result.FinalDmg); ok && maxHp > 0 {
-				pct := newHp * 10 / maxHp
-				if pct > 10 {
-					pct = 10
-				}
-				if pct < 0 {
-					pct = 0
-				}
-				bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
-				flavorLines = append(flavorLines, fmt.Sprintf("  📊 HP: %s %d/%d", bar, newHp, maxHp))
-			} else if target == ctx.Player.Name {
+			if target == ctx.Player.Name {
 				if hpMax, exists := VarGetValueInt64(ctx, "hpmax"); exists && hpMax > 0 {
 					curHp, _ := VarGetValueInt64(ctx, "hp")
 					newHp := curHp - result.FinalDmg
@@ -634,19 +622,21 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 					} else {
 						VarSetValueInt64(ctx, "hp", newHp)
 						if newHp == 0 && curHp > 0 {
-							triggerDeathSave(ctx, target)
+							flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
 						}
 					}
 					pct := newHp * 10 / hpMax
-					if pct > 10 {
-						pct = 10
-					}
-					if pct < 0 {
-						pct = 0
-					}
+					if pct > 10 { pct = 10 }
+					if pct < 0 { pct = 0 }
 					bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
 					flavorLines = append(flavorLines, fmt.Sprintf("  📊 HP: %s %d/%d", bar, newHp, hpMax))
 				}
+			} else if newHp, maxHp, ok := updateNPCHP(ctx, target, result.FinalDmg); ok && maxHp > 0 {
+				pct := newHp * 10 / maxHp
+				if pct > 10 { pct = 10 }
+				if pct < 0 { pct = 0 }
+				bar := strings.Repeat("█", int(pct)) + strings.Repeat("░", 10-int(pct))
+				flavorLines = append(flavorLines, fmt.Sprintf("  📊 HP: %s %d/%d", bar, newHp, maxHp))
 			}
 		}
 	}

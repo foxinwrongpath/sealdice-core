@@ -720,9 +720,6 @@ func getDefenderEvasionDR(ctx *MsgContext, defender string) int64 {
 
 // triggerDeathSave 检查玩家 HP 是否归零，并触发死亡豁免提示
 func triggerDeathSave(ctx *MsgContext, playerName string) {
-	if playerName != ctx.Player.Name {
-		return
-	}
 	hp, _ := VarGetValueInt64(ctx, "hp")
 	if hp > 0 {
 		return

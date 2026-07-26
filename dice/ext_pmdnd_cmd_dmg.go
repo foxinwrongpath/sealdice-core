@@ -389,7 +389,7 @@ var cmdCrit = &CmdItemInfo{
 		ctLimit := int64(20)
 		advantage := ""
 
-		for i := 1; i < len(cmdArgs.Args); i++ {
+		for i := 0; i < len(cmdArgs.Args); i++ {
 			a := cmdArgs.Args[i]
 			if n, err := strconv.ParseInt(a, 10, 64); err == nil && n >= 2 && n <= 20 {
 				ctLimit = n
