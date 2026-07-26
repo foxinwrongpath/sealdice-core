@@ -11,17 +11,24 @@ import (
 
 var cmdInit = &CmdItemInfo{
 	Name: "init",
-	ShortHelp: ".init {add|list|del|set|next|clear} ...\n" +
-		"快捷添加：.ri [值] [名称]",
-	Help: "PMDnD 先攻管理:\n" +
-		".init list                           查看先攻列表\n" +
-		".init add <名称> [先攻值]             添加单位（如未给值则自动掷d20）\n" +
-		".init del <名称> ...                 删除单位\n" +
-		".init set <名称> <先攻表达式>         设置单位的先攻（可包含d20）\n" +
-		".init next                           进入下一回合\n" +
-		".init clear                          清空先攻列表\n" +
-		"快捷指令：.ri 15 张三  或  .ri 张三（自动掷骰）\n" +
-		"         .ri 优势 张三  或 .ri 劣势 张三",
+	ShortHelp: ".init // 查看先攻列表\n" +
+		".init del <单位1> <单位2> ... // 从先攻列表中删除\n" +
+		".init set <单位名称> <先攻表达式> // 设置单位的先攻\n" +
+		".init clear/clr // 清除先攻列表（同时重置能力等级）\n" +
+		".init end/ed/next // 结束一回合（同时结算状态）\n" +
+		".init help // 显示帮助",
+	Help: ".init // 查看先攻列表\n" +
+		".init del <单位1> <单位2> ... // 从先攻列表中删除\n" +
+		".init set <单位名称> <先攻表达式> // 设置单位的先攻\n" +
+		".init clear/clr // 清除先攻列表，并重置所有目标的能力变化等级（物攻+2等）\n" +
+		"   💡 累积型状态（灼伤、中毒等）不会被清除，需要治疗\n" +
+		".init end/ed/next // 结束当前回合，进入下一回合（同时自动结算状态）\n" +
+		".init help // 显示帮助\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"💡 相关命令:\n" +
+		"  .buff stat          查看当前状态\n" +
+		"  .buff reset         仅重置能力等级\n" +
+		"  .buff clear all     清除所有状态（包括累积型状态）",
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
 		// 如果命令是 .ri，自动转换成 .init add
 		if cmdArgs.Command == "ri" {
@@ -163,22 +170,55 @@ var cmdInit = &CmdItemInfo{
 			riList.SaveToGroup(ctx)
 			ReplyToSender(ctx, msg, fmt.Sprintf("设置 %s 先攻为 %d", name, val))
 
-		case "next", "end":
+		case "ed", "end", "next":
+			// 检查是否带 --no-tick 参数
+			noTick := false
+			for _, arg := range cmdArgs.Args {
+				if arg == "--no-tick" || arg == "-n" {
+					noTick = true
+					break
+				}
+			}
+
+			// 如果不跳过 tick，则先结算状态
+			if !noTick {
+				// 调用 .buff tick 的逻辑
+				tickResults := executeBuffTick(ctx)
+				if tickResults != "" {
+					ReplyToSender(ctx, msg, "⏱️ 回合结束，状态结算:\n"+tickResults)
+				}
+			}
+
+			// 原有的切换回合逻辑
 			lst := (RIList{}).LoadByCurGroup(ctx)
+			round, _ := VarGetValueInt64(ctx, "$g回合数")
 			if len(lst) == 0 {
 				ReplyToSender(ctx, msg, "先攻列表为空")
-				return CmdExecuteResult{Matched: true, Solved: true}
+				break
 			}
-			round, _ := VarGetValueInt64(ctx, "$g回合数")
 			round = (round + 1) % int64(len(lst))
 			setInitNextRoundVars(ctx, lst, round)
 			ReplyToSender(ctx, msg, DiceFormatTmpl(ctx, "DND:先攻_下一回合"))
 
-		case "clear", "clr":
+		case "clr", "clear":
+			// 1. 清空先攻列表
 			(RIList{}).SaveToGroup(ctx)
 			VarSetValueInt64(ctx, "$g当前回合先攻值", NULL_INIT_VAL)
 			VarSetValueInt64(ctx, "$g回合数", 0)
-			ReplyToSender(ctx, msg, DiceFormatTmpl(ctx, "DND:先攻_清除列表"))
+
+			// 2. 重置所有目标的能力变化等级（战斗结束，能力恢复）
+			states := loadAllBattleStates(ctx)
+			for target, state := range states {
+				state.AttackLevel = 0
+				state.DefenseLevel = 0
+				state.SpAttackLevel = 0
+				state.SpDefenseLevel = 0
+				state.SpeedLevel = 0
+				// 注意：不清理累积型状态！
+				saveBattleStateFor(ctx, target, state)
+			}
+
+			ReplyToSender(ctx, msg, "📊 先攻列表已清除\n能力变化等级已重置\n")
 
 		default:
 			return CmdExecuteResult{Matched: true, Solved: true, ShowHelp: true}
@@ -196,3 +236,5 @@ var cmdRi = &CmdItemInfo{
 		return cmdInit.Solve(ctx, msg, cmdArgs)
 	},
 }
+
+//todo: 1.先攻列表内倒下的宝可梦应自动被清空状态并移除

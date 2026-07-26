@@ -131,6 +131,12 @@ var cmdSt = getCmdStBase(CmdStOverrideInfo{
 			if newHp > curHpMax {
 				return ds.NewIntVal(curHpMax)
 			}
+			if theOldValue != nil {
+				oldHp, _ := theOldValue.ReadInt()
+				if newHp <= 0 && int64(oldHp) > 0 {
+					triggerDeathSave(ctx, ctx.Player.Name)
+				}
+			}
 		}
 		return theNewValue
 	},

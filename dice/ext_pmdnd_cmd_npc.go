@@ -118,6 +118,7 @@ func getNPCStringAttr(ctx *MsgContext, name string, attr string) string {
 }
 
 // updateNPCHP 更新 NPC 的 HP（扣除伤害），返回新 HP、最大值和是否成功
+// 如果 HP 降到 0，自动清理状态并从先攻列表移除
 func updateNPCHP(ctx *MsgContext, name string, damage int64) (newHp int64, maxHp int64, ok bool) {
 	data := loadNPCData(ctx)
 	props, exists := data[name]
@@ -158,7 +159,49 @@ func updateNPCHP(ctx *MsgContext, name string, damage int64) (newHp int64, maxHp
 	}
 	props["hp"] = int(newHp)
 	saveNPCData(ctx, data)
+
+	// 如果 NPC 死亡，清理状态并从先攻列表移除
+	if newHp <= 0 {
+		// 清理战斗状态
+		clearNPCBattleState(ctx, name)
+		// 从先攻列表移除
+		removeFromInitList(ctx, name)
+	}
+
 	return newHp, maxHp, true
+}
+
+// removeFromInitList 从先攻列表中移除指定角色
+func removeFromInitList(ctx *MsgContext, name string) {
+	riList := (RIList{}).LoadByCurGroup(ctx)
+	newList := RIList{}
+	for _, item := range riList {
+		if item.name != name {
+			newList = append(newList, item)
+		}
+	}
+	newList.SaveToGroup(ctx)
+	if len(newList) == 0 {
+		VarSetValueInt64(ctx, "$g当前回合先攻值", NULL_INIT_VAL)
+		VarSetValueInt64(ctx, "$g回合数", 0)
+	} else {
+		// 如果当前回合的角色被移除，调整回合指针
+		round, _ := VarGetValueInt64(ctx, "$g回合数")
+		if round >= int64(len(newList)) {
+			round = 0
+			VarSetValueInt64(ctx, "$g回合数", round)
+			setInitNextRoundVars(ctx, newList, round)
+		}
+	}
+}
+
+// clearNPCBattleState 清理 NPC 的战斗状态（在状态池中移除）
+func clearNPCBattleState(ctx *MsgContext, name string) {
+	states := loadAllBattleStates(ctx)
+	if _, ok := states[name]; ok {
+		delete(states, name)
+		saveAllBattleStates(ctx, states)
+	}
 }
 
 // getNPCHP 获取 NPC 的 HP 信息
@@ -408,6 +451,9 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 					newHp = 0
 				}
 				VarSetValueInt64(ctx, "hp", newHp)
+				if newHp == 0 && curHp > 0 {
+					triggerDeathSave(ctx, target)
+				}
 				pct := newHp * 10 / hpMax
 				if pct > 10 {
 					pct = 10
@@ -522,6 +568,9 @@ func executeNPCAttack(ctx *MsgContext, msg *Message, npcName string, moveName st
 						newHp = 0
 					}
 					VarSetValueInt64(ctx, "hp", newHp)
+					if newHp == 0 && curHp > 0 {
+						triggerDeathSave(ctx, target)
+					}
 					pct := newHp * 10 / hpMax
 					if pct > 10 {
 						pct = 10
@@ -584,6 +633,7 @@ func getNpcHelp() string {
 		"\n" +
 		"💡 设置 hpmax 后，攻击会自动扣血并显示血条\n" +
 		"💡 NPC 使用招式不消耗 PP，无需设置 pp\n" +
+		"💡 当 NPC 的 HP 降到 0 时，会自动清理其战斗状态\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
@@ -695,7 +745,6 @@ var cmdNPC = &CmdItemInfo{
 		// ============================================
 		if sub == "st" || sub == "属性" {
 			props := data[npcName]
-			// 修复：属性参数从 parts[2:] 开始（原来是 parts[3:]）
 			args := parts[2:]
 			if len(args) == 0 {
 				ReplyToSender(ctx, msg, "请指定属性: .npc <名称> st <属性1>:<值1> ...")
@@ -705,7 +754,6 @@ var cmdNPC = &CmdItemInfo{
 			var setItems []string
 
 			for _, arg := range args {
-				// 尝试匹配操作符: 属性:值 (赋值) 或 属性+值 (增加) 或 属性-值 (减少)
 				var op string
 				var key, valStr string
 
@@ -748,20 +796,26 @@ var cmdNPC = &CmdItemInfo{
 				} else {
 					// 加减模式：读取当前值，计算新值
 					currentVal, exists := props[key]
-					if !exists {
-						ReplyToSender(ctx, msg, fmt.Sprintf("属性 %s 不存在，无法执行 %s 操作。请先设置该属性", key, op))
-						return CmdExecuteResult{Matched: true, Solved: true}
-					}
-
 					var currentNum float64
-					switch v := currentVal.(type) {
-					case int:
-						currentNum = float64(v)
-					case float64:
-						currentNum = v
-					default:
-						ReplyToSender(ctx, msg, fmt.Sprintf("属性 %s 不是数值类型，无法执行加减操作", key))
-						return CmdExecuteResult{Matched: true, Solved: true}
+
+					if !exists {
+						// 如果属性不存在，对于 hp 特殊处理：初始化为 0
+						if key == "hp" {
+							currentNum = 0
+						} else {
+							ReplyToSender(ctx, msg, fmt.Sprintf("属性 %s 不存在，无法执行 %s 操作。请先设置该属性", key, op))
+							return CmdExecuteResult{Matched: true, Solved: true}
+						}
+					} else {
+						switch v := currentVal.(type) {
+						case int:
+							currentNum = float64(v)
+						case float64:
+							currentNum = v
+						default:
+							ReplyToSender(ctx, msg, fmt.Sprintf("属性 %s 不是数值类型，无法执行加减操作", key))
+							return CmdExecuteResult{Matched: true, Solved: true}
+						}
 					}
 
 					// 解析表达式（支持 2d5, 3d6+2 等）
@@ -769,7 +823,6 @@ var cmdNPC = &CmdItemInfo{
 					exprResult := ctx.Eval(valStr, nil)
 					var delta float64
 					if ctx.vm.Error != nil {
-						// 尝试直接解析为数字
 						if i, err := strconv.ParseFloat(valStr, 64); err == nil {
 							delta = i
 						} else {
@@ -1049,6 +1102,26 @@ var cmdNPC = &CmdItemInfo{
 
 				return executeNPCAttack(ctx, msg, npcName, moveName, target, advantage, ctLimit, detailMode, debugMode)
 			}
+			return CmdExecuteResult{Matched: true, Solved: true}
+		}
+
+		// ============================================
+		// 快捷查看: .npc <名称>  (无子命令时显示属性)
+		// ============================================
+		if sub == "" {
+			props := data[npcName]
+			var lines []string
+			lines = append(lines, fmt.Sprintf("NPC %s 属性:", npcName))
+			for k, v := range props {
+				if k == "hp" {
+					if hpmax, ok := props["hpmax"]; ok {
+						lines = append(lines, fmt.Sprintf("  HP: %v/%v", v, hpmax))
+						continue
+					}
+				}
+				lines = append(lines, fmt.Sprintf("  %s: %v", k, v))
+			}
+			ReplyToSender(ctx, msg, strings.Join(lines, "\n"))
 			return CmdExecuteResult{Matched: true, Solved: true}
 		}
 

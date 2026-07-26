@@ -1,6 +1,7 @@
 package dice
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -37,6 +38,84 @@ type HealResult struct {
 	StabMul    float64 // STAB 倍率
 	Crit       bool    // 是否暴击
 	HealAtkVal int64   // 治疗攻击值（特防）
+}
+
+// ----- 状态修正辅助函数 -----
+
+// applyCumulativeStateModifiers 应用防御者的累积型状态修正
+func applyCumulativeStateModifiers(defState *BattleState, isSpecial bool, rawAtkVal *int64, defVal *int64, hitPenalty *int) {
+	if defState == nil {
+		return
+	}
+
+	// 灼伤：物攻 -25（仅物理攻击）
+	if layers, ok := defState.Cumulative["灼伤"]; ok && layers > 0 && !isSpecial {
+		*rawAtkVal -= int64(layers) * 25 / 20 // 每层 -1.25，取整
+	}
+	// 冻伤：特攻 -25（仅特殊攻击）
+	if layers, ok := defState.Cumulative["冻伤"]; ok && layers > 0 && isSpecial {
+		*rawAtkVal -= int64(layers) * 25 / 20
+	}
+	// 溶解：物防 -25
+	if layers, ok := defState.Cumulative["溶解"]; ok && layers > 0 && !isSpecial {
+		*defVal -= int64(layers) * 25 / 20
+	}
+	// 破防：特防 -25
+	if layers, ok := defState.Cumulative["破防"]; ok && layers > 0 && isSpecial {
+		*defVal -= int64(layers) * 25 / 20
+	}
+	// 麻痹：回避 -2（影响最终伤害减免）
+	if layers, ok := defState.Cumulative["麻痹"]; ok && layers > 0 {
+		// 麻痹每层 -0.1 回避，最高 -2
+		*hitPenalty -= int(layers / 10)
+		if *hitPenalty < -2 {
+			*hitPenalty = -2
+		}
+	}
+	// 瞌睡：命中 -2（影响攻击掷骰）
+	// 注意：瞌睡影响攻击方，但我们这里只处理防御者状态
+	// 攻击者的瞌睡应该在调用 calculateDamage 之前由调用者处理
+}
+
+// applySevereStateEffects 应用防御者的严重状态效果
+func applySevereStateEffects(defState *BattleState, isSpecial bool, rawAtkVal *int64, defVal *int64) {
+	if defState == nil {
+		return
+	}
+
+	// 检查是否有任何严重状态
+	severeStates := map[string]string{
+		"严重灼伤": "物攻",
+		"严重冻伤": "特攻",
+		"严重溶解": "物防",
+		"严重破防": "特防",
+	}
+
+	for severeName, target := range severeStates {
+		// 检查持续型状态中是否有严重状态（严重状态作为持续型状态存储）
+		for _, os := range defState.Ongoing {
+			if os.Name == severeName && os.Rounds > 0 {
+				switch target {
+				case "物攻":
+					if !isSpecial {
+						*rawAtkVal -= 50
+					}
+				case "特攻":
+					if isSpecial {
+						*rawAtkVal -= 50
+					}
+				case "物防":
+					if !isSpecial {
+						*defVal -= 50
+					}
+				case "特防":
+					if isSpecial {
+						*defVal -= 50
+					}
+				}
+			}
+		}
+	}
 }
 
 // ----- 辅助获取函数 -----
@@ -178,7 +257,6 @@ func applyTerrainModifier(atkType string, state *BattleState) float64 {
 			terrainMod = 1.3
 		}
 	case "失序场地", "chaos":
-		// 失序场地对所有属性都有加成（除无属性外）
 		if atkType != "一般" && atkType != "力场" {
 			terrainMod = 1.2
 		}
@@ -187,7 +265,7 @@ func applyTerrainModifier(atkType string, state *BattleState) float64 {
 }
 
 // rollD20 掷骰并返回结果和百分比
-func rollD20(ctx *MsgContext, advantage string, ctLimit int64) (d20 int64, rollPct float64, critText string) {
+func rollD20(ctx *MsgContext, advantage string, ctLimit int64, hitPenalty int) (d20 int64, rollPct float64, critText string) {
 	d20Expr := "d20"
 	if advantage != "" {
 		d20Expr = "d20" + advantage
@@ -199,6 +277,21 @@ func rollD20(ctx *MsgContext, advantage string, ctLimit int64) (d20 int64, rollP
 	}
 	d, _ := r.ReadInt()
 	d20 = int64(d)
+
+	// 应用命中惩罚（瞌睡状态等）
+	// 注意：这里只处理负修正，不处理正修正
+	if hitPenalty < 0 {
+		// 将命中惩罚转换为百分比偏移
+		// 例如命中-2 相当于 d20 出目 -2
+		adjusted := d20 + int64(hitPenalty)
+		if adjusted < 1 {
+			adjusted = 1
+		}
+		if adjusted > 20 {
+			adjusted = 20
+		}
+		d20 = adjusted
+	}
 
 	rollPct = float64(d20) * 0.05
 	if d20 >= ctLimit {
@@ -215,9 +308,7 @@ func rollD20(ctx *MsgContext, advantage string, ctLimit int64) (d20 int64, rollP
 // ----- STAB 和克制计算 -----
 
 // calculateSTAB 计算本系加成倍率
-// calculateSTAB 计算本系加成倍率
 func calculateSTAB(ctx *MsgContext, attacker string, atkType string) float64 {
-	// 判断攻击者是否为 NPC
 	isNPC := false
 	data := loadNPCData(ctx)
 	if _, ok := data[attacker]; ok {
@@ -230,10 +321,8 @@ func calculateSTAB(ctx *MsgContext, attacker string, atkType string) float64 {
 		var typeVal int64
 
 		if isNPC {
-			// NPC：只从 NPC 数据读取
 			typeVal = getNPCAttr(ctx, attacker, key)
 		} else {
-			// 玩家：从用户上下文读取
 			if v, _ := VarGetValueInt64(ctx, key); v > 0 {
 				typeVal = v
 			}
@@ -261,7 +350,7 @@ func calculateSTAB(ctx *MsgContext, attacker string, atkType string) float64 {
 			if stabVal > 0 {
 				stabMul = (100.0 + float64(stabVal)) / 100.0
 			} else {
-				stabMul = 1.5 // 默认本系加成
+				stabMul = 1.5
 			}
 			break
 		}
@@ -276,7 +365,6 @@ func calculateTypeModifier(ctx *MsgContext, defender string, atkType string) flo
 	}
 	typeMod := 0.0
 
-	// 检查防御者是否是 NPC
 	isNPC := false
 	data := loadNPCData(ctx)
 	if _, ok := data[defender]; ok {
@@ -288,10 +376,8 @@ func calculateTypeModifier(ctx *MsgContext, defender string, atkType string) flo
 		var typeVal int64
 
 		if isNPC {
-			// NPC：只从 NPC 数据读取，不回退到用户上下文
 			typeVal = getNPCAttr(ctx, defender, key)
 		} else {
-			// 玩家：从用户上下文读取
 			if v, _ := VarGetValueInt64(ctx, key); v > 0 {
 				typeVal = v
 			}
@@ -341,14 +427,30 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 
 	// 1. 获取基础数值
 	rawAtkVal := getAttackValue(ctx, attacker, isSpecial)
-	result.DefVal = getDefenseValue(ctx, defender, isSpecial)
+	defVal := getDefenseValue(ctx, defender, isSpecial)
 	battleLv := getBattleLevel(ctx, attacker)
 	result.BattleLv = battleLv
 
-	// 2. 加载战斗状态
+	// 2. 加载防御者的战斗状态（用于状态修正）
+	defState := loadBattleStateFor(ctx, defender)
+
+	// 3. 应用防御者的累积型状态修正（灼伤/冻伤/溶解/破防/麻痹）
+	hitPenalty := 0
+	applyCumulativeStateModifiers(defState, isSpecial, &rawAtkVal, &defVal, &hitPenalty)
+
+	// 4. 应用防御者的严重状态修正
+	applySevereStateEffects(defState, isSpecial, &rawAtkVal, &defVal)
+
+	// 5. 确保防御值不低于最小值
+	if defVal < 1 {
+		defVal = 1
+	}
+	result.DefVal = defVal
+
+	// 6. 加载攻击者状态（用于天气/场地/能力等级）
 	state := loadBattleState(ctx)
 
-	// 3. 应用天气和场地修正到攻击值
+	// 7. 应用天气和场地修正到攻击值
 	weatherMod := applyWeatherModifier(atkType, state)
 	terrainMod := applyTerrainModifier(atkType, state)
 	envMod := weatherMod * terrainMod
@@ -357,12 +459,21 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		adjustedRawAtkVal = 1
 	}
 
-	// 4. 应用能力等级修正
+	// 8. 应用能力等级修正
 	atkVal := applyAbilityModifier(state, isSpecial, adjustedRawAtkVal)
 	result.AtkVal = atkVal
 
-	// 5. 掷骰
-	d20, rollPct, critText := rollD20(ctx, advantage, ctLimit)
+	// 9. 检查攻击者自身的瞌睡状态（命中-2）
+	attackerState := loadBattleStateFor(ctx, attacker)
+	if v, ok := attackerState.Cumulative["瞌睡"]; ok && v > 0 {
+		hitPenalty -= int(v / 10)
+		if hitPenalty < -2 {
+			hitPenalty = -2
+		}
+	}
+
+	// 10. 掷骰
+	d20, rollPct, critText := rollD20(ctx, advantage, ctLimit, hitPenalty)
 	if strings.HasPrefix(critText, "骰点") {
 		return result, critText
 	}
@@ -372,8 +483,8 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	result.Hit = rollPct > 0
 	result.Crit = critText != "" && critText != "【大失败】"
 
-	// 6. 基础伤害
-	totalDmg := int64(float64(power*battleLv*atkVal) * rollPct / (100.0 * float64(result.DefVal)))
+	// 11. 基础伤害
+	totalDmg := int64(float64(power*battleLv*atkVal) * rollPct / (100.0 * float64(defVal)))
 	if totalDmg < 1 {
 		totalDmg = 1
 	}
@@ -382,13 +493,13 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 	}
 	result.BaseDmg = totalDmg
 
-	// 7. STAB 和克制
+	// 12. STAB 和克制
 	stabMul := calculateSTAB(ctx, attacker, atkType)
 	result.StabMul = stabMul
 	typeMod := calculateTypeModifier(ctx, defender, atkType)
 	result.TypeMod = typeMod
 
-	// 8. 应用 STAB 和克制
+	// 13. 应用 STAB 和克制
 	finalDmg := totalDmg
 	if typeMod != 0 || stabMul != 1.0 {
 		factor := (2.0 + typeMod) / 2.0
@@ -399,17 +510,17 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		finalDmg = int64(float64(totalDmg) * factor)
 	}
 
-	// 9. 应用结界减伤
+	// 14. 应用结界减伤
 	finalDmg = applyBarrierReduction(state, isSpecial, finalDmg)
 	result.FinalDmg = finalDmg
 
-	// 10. 填充结果字段
+	// 15. 填充结果字段
 	result.Attacker = attacker
 	result.Defender = defender
 	result.Power = power
 	result.AtkType = atkType
 
-	// 11. 效果文本
+	// 16. 效果文本
 	totalFactor := 1.0
 	if typeMod != 0 || stabMul != 1.0 {
 		factor := (2.0 + typeMod) / 2.0
@@ -418,9 +529,7 @@ func calculateDamage(ctx *MsgContext, power int64, atkType string, isSpecial boo
 		}
 		totalFactor = factor * stabMul
 	}
-	// 环境修正也影响效果判定
 	totalFactor = totalFactor * envMod
-	// 结界减半也影响效果判定
 	if (!isSpecial && state.ReflectWall > 0) || (isSpecial && state.LightScreen > 0) {
 		totalFactor = totalFactor / 2
 	}
@@ -458,7 +567,7 @@ func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage strin
 	}
 
 	// 4. 掷骰
-	d20, rollPct, critText := rollD20(ctx, advantage, ctLimit)
+	d20, rollPct, critText := rollD20(ctx, advantage, ctLimit, 0)
 	if strings.HasPrefix(critText, "骰点") {
 		return result, critText
 	}
@@ -466,7 +575,7 @@ func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage strin
 	// 治疗无视大失败：d20=1 时正常计算（5%），而不是0
 	if d20 == 1 && rollPct == 0 {
 		rollPct = 0.05
-		critText = "" // 清除大失败文本
+		critText = ""
 	}
 
 	result.D20 = d20
@@ -499,4 +608,27 @@ func calculateHeal(ctx *MsgContext, power int64, atkType string, advantage strin
 	result.FinalHeal = finalHeal
 
 	return result, ""
+}
+
+// ----- 死亡豁免函数 -----
+
+// triggerDeathSave 检查玩家 HP 是否归零，并触发死亡豁免提示
+func triggerDeathSave(ctx *MsgContext, playerName string) {
+	if playerName != ctx.Player.Name {
+		return
+	}
+	hp, _ := VarGetValueInt64(ctx, "hp")
+	if hp > 0 {
+		return
+	}
+	// 检查是否已经死亡
+	deathSuccess, _ := VarGetValueInt64(ctx, "DSS")
+	deathFailure, _ := VarGetValueInt64(ctx, "DSF")
+	if deathFailure >= 3 || deathSuccess >= 3 {
+		return // 已经死亡或伤势稳定
+	}
+	// 发出提示
+	ReplyToSender(ctx, &Message{}, fmt.Sprintf(
+		"💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免",
+		getPlayerNameTempFunc(ctx)))
 }

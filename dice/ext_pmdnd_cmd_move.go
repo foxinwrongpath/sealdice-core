@@ -47,20 +47,17 @@ func parseHitCount(ctx *MsgContext, hitsStr string) int {
 }
 
 // parseMoveTargets 解析 .move 的目标和参数
-// 返回值: targets, advantage, ctLimit, isGroupMode, detailMode, debugMode, hasUserTarget
-func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attacker string) ([]string, string, int64, bool, bool, bool, bool) {
+func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attacker string) ([]string, string, int64, bool, bool, bool) {
 	advantage := ""
 	ctLimit := int64(20)
-	var specifiedTargets []string // @ 指定的目标
-	var possibleTargets []string  // 不带 @ 的目标名（如 "圈圈熊"）
+	var specifiedTargets []string
 	var groupType string
 	isGroupMode := false
 	detailMode := false
 	debugMode := false
-	hasUserTarget := false
 
 	if len(cmdArgs.Args) < 2 {
-		return nil, advantage, ctLimit, isGroupMode, detailMode, debugMode, false
+		return nil, advantage, ctLimit, isGroupMode, detailMode, debugMode
 	}
 	params := cmdArgs.Args[1:]
 
@@ -71,25 +68,17 @@ func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attac
 			case "enemies", "敌人", "敌方":
 				isGroupMode = true
 				groupType = "enemies"
-				hasUserTarget = true
 			case "allies", "友方", "队友":
 				isGroupMode = true
 				groupType = "allies"
-				hasUserTarget = true
 			case "others", "其他", "除己":
 				isGroupMode = true
 				groupType = "others"
-				hasUserTarget = true
 			case "all", "全部", "全体":
 				isGroupMode = true
 				groupType = "all"
-				hasUserTarget = true
-			case "自己", "me":
-				specifiedTargets = append(specifiedTargets, attacker)
-				hasUserTarget = true
 			default:
 				specifiedTargets = append(specifiedTargets, target)
-				hasUserTarget = true
 			}
 		} else if p == "优势" || p == "優勢" || p == "adv" || p == "advantage" {
 			advantage = "优势"
@@ -101,10 +90,6 @@ func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attac
 			debugMode = true
 		} else if n, e := strconv.ParseInt(p, 10, 64); e == nil && n >= 2 && n <= 20 {
 			ctLimit = n
-		} else {
-			// 其他非关键词参数，视为不带 @ 的目标名（如 "圈圈熊"）
-			possibleTargets = append(possibleTargets, p)
-			hasUserTarget = true
 		}
 	}
 
@@ -152,15 +137,20 @@ func parseMoveTargets(ctx *MsgContext, mctx *MsgContext, cmdArgs *CmdArgs, attac
 		}
 	}
 
-	// 如果没有 @ 目标和群体模式，但有 possibleTargets，则取第一个作为目标
-	if len(finalTargets) == 0 && !isGroupMode && len(possibleTargets) > 0 {
-		finalTargets = append(finalTargets, possibleTargets[0])
+	if len(finalTargets) == 0 {
+		riList := (RIList{}).LoadByCurGroup(ctx)
+		for _, item := range riList {
+			if item.name != attacker {
+				finalTargets = append(finalTargets, item.name)
+				break
+			}
+		}
 	}
 
-	return finalTargets, advantage, ctLimit, isGroupMode, detailMode, debugMode, hasUserTarget
+	return finalTargets, advantage, ctLimit, isGroupMode, detailMode, debugMode
 }
 
-// validateMoveTargets 验证目标是否合法（目标已非空）
+// validateMoveTargets 验证目标是否合法
 func validateMoveTargets(categoryLower string, targets []string, attacker string, isGroupMode bool) (bool, string) {
 	if len(targets) == 0 {
 		return false, "没有指定目标"
@@ -194,11 +184,7 @@ func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 	var lines []string
 
 	// 1. 骰子行
-	diceExpr := "d20"
-	if advantage != "" {
-		diceExpr = "d20" + advantage
-	}
-	diceLine := fmt.Sprintf("🎲 %s=%d", diceExpr, healResult.D20)
+	diceLine := fmt.Sprintf("🎲 d20=%d", healResult.D20)
 	if healResult.RollPct > 0 {
 		diceLine += fmt.Sprintf(" → %s", pctDisplay)
 	}
@@ -222,12 +208,7 @@ func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 		}
 		lines = append(lines, fmt.Sprintf("  最终: %d", healResult.FinalHeal))
 		if detailMode {
-			ppmax, _ := VarGetValueInt64(ctx, "ppmax")
-			if ppmax > 0 {
-				lines = append(lines, fmt.Sprintf("  资源: PP %d/%d", remainingPP, ppmax))
-			} else {
-				lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
-			}
+			lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
 		}
 	} else if detailMode {
 		lines = append(lines, fmt.Sprintf("📐 威力 %d × 100级 × %d治疗 × %s ÷ 200 × %.2f修正 = %d",
@@ -287,7 +268,7 @@ func executeHealMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 // ---------- executeBuffMove ----------
 func executeBuffMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name string, effectsRaw string, remainingPP int64, detailMode bool, debugMode bool) CmdExecuteResult {
 	if effectsRaw != "" {
-		state := loadBattleState(ctx)
+		state := loadBattleStateFor(ctx, mctx.Player.Name)
 		effectList := strings.Split(effectsRaw, ",")
 		applied := false
 		for _, eff := range effectList {
@@ -350,24 +331,19 @@ func executeBuffMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name strin
 		if !applied {
 			state.AttackLevel = clampLevel(state.AttackLevel + 1)
 		}
-		saveBattleState(ctx, state)
+		saveBattleStateFor(ctx, mctx.Player.Name, state)
 	} else {
-		state := loadBattleState(ctx)
+		state := loadBattleStateFor(ctx, mctx.Player.Name)
 		state.AttackLevel = clampLevel(state.AttackLevel + 1)
-		saveBattleState(ctx, state)
+		saveBattleStateFor(ctx, mctx.Player.Name, state)
 	}
 
-	state := loadBattleState(ctx)
+	state := loadBattleStateFor(ctx, mctx.Player.Name)
 	var lines []string
 	lines = append(lines, fmt.Sprintf("💪 %s 使用了 %s！", getPlayerNameTempFunc(mctx), name))
 	lines = append(lines, fmt.Sprintf("  %s", stateToString(state)))
 	if debugMode || detailMode {
-		ppmax, _ := VarGetValueInt64(ctx, "ppmax")
-		if ppmax > 0 {
-			lines = append(lines, fmt.Sprintf("  资源: PP %d/%d", remainingPP, ppmax))
-		} else {
-			lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
-		}
+		lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
 	}
 
 	ReplyToSender(mctx, msg, strings.Join(lines, "\n"))
@@ -393,11 +369,7 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 	pctDisplay := fmt.Sprintf("%.0f%%", result.RollPct*100)
 
 	// 1. 骰子行
-	diceExpr := "d20"
-	if advantage != "" {
-		diceExpr = "d20" + advantage
-	}
-	diceLine := fmt.Sprintf("🎲 %s=%d", diceExpr, result.D20)
+	diceLine := fmt.Sprintf("🎲 d20=%d", result.D20)
 	if result.Hit && result.RollPct > 0 {
 		diceLine += fmt.Sprintf(" → %s", pctDisplay)
 	}
@@ -423,16 +395,11 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 					factor = 0.25
 				}
 				if result.StabMul != 1.0 && result.TypeMod != 0 {
-					lines = append(lines, fmt.Sprintf("  STAB: x%.2f  |  伤害修正: %+.0f (倍率 %.2fx)",
-						result.StabMul, result.TypeMod, factor))
+					lines = append(lines, fmt.Sprintf("  STAB: x%.2f  |  克制: x%.2f", result.StabMul, factor))
 				} else if result.StabMul != 1.0 {
 					lines = append(lines, fmt.Sprintf("  STAB: x%.2f", result.StabMul))
 				} else if result.TypeMod != 0 {
-					factor := (2.0 + result.TypeMod) / 2.0
-					if factor < 0.25 {
-						factor = 0.25
-					}
-					lines = append(lines, fmt.Sprintf("  伤害修正: %+.0f (倍率 %.2fx)", result.TypeMod, factor))
+					lines = append(lines, fmt.Sprintf("  克制: x%.2f", factor))
 				}
 			}
 			lines = append(lines, fmt.Sprintf("  最终伤害: %d", result.FinalDmg))
@@ -440,12 +407,7 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 			lines = append(lines, "  结果: 未命中")
 		}
 		if detailMode {
-			ppmax, _ := VarGetValueInt64(ctx, "ppmax")
-			if ppmax > 0 {
-				lines = append(lines, fmt.Sprintf("  资源: PP %d/%d", remainingPP, ppmax))
-			} else {
-				lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
-			}
+			lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
 		}
 	} else if detailMode && result.Hit {
 		calcLine := fmt.Sprintf("📐 %d × %d级 × %d攻 × %s ÷ %d防", power, result.BattleLv, result.AtkVal, pctDisplay, result.DefVal)
@@ -501,6 +463,10 @@ func executeDamageMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name str
 						newHp = 0
 					}
 					VarSetValueInt64(ctx, "hp", newHp)
+					// 如果 HP 归零，触发死亡豁免提示
+					if newHp == 0 && curHp > 0 {
+						flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
+					}
 					pct := newHp * 10 / hpMax
 					if pct > 10 {
 						pct = 10
@@ -587,12 +553,7 @@ func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name s
 	lines = append(lines, fmt.Sprintf("  总伤害: %d 点！", totalDmg))
 
 	if debugMode || detailMode {
-		ppmax, _ := VarGetValueInt64(ctx, "ppmax")
-		if ppmax > 0 {
-			lines = append(lines, fmt.Sprintf("  资源: PP %d/%d", remainingPP, ppmax))
-		} else {
-			lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
-		}
+		lines = append(lines, fmt.Sprintf("  资源: PP %d", remainingPP))
 	}
 
 	flavorLines := []string{}
@@ -621,6 +582,10 @@ func executeMultiHitMove(ctx *MsgContext, mctx *MsgContext, msg *Message, name s
 				newHp = 0
 			}
 			VarSetValueInt64(ctx, "hp", newHp)
+			// 如果 HP 归零，触发死亡豁免提示
+			if newHp == 0 && curHp > 0 {
+				flavorLines = append(flavorLines, fmt.Sprintf("💔 %s 失去了战斗能力！\n请使用 .ds 进行濒死豁免", getPlayerNameTempFunc(ctx)))
+			}
 			pct := newHp * 10 / hpMax
 			if pct > 10 {
 				pct = 10
@@ -660,15 +625,13 @@ var cmdMove = &CmdItemInfo{
 		"🎯 目标选取规则:\n" +
 		"  · 伤害招式: 不指定目标时自动从先攻列表选取第一个非己单位\n" +
 		"  · 治疗/强化: 不指定目标时默认对自己使用\n" +
-		"  · 可使用 @目标 指定任意目标（支持 @自己）\n" +
+		"  · 可使用 @目标 指定任意目标\n" +
 		"  · 使用 @enemies / @allies / @others / @all 指定群体\n" +
 		"\n" +
 		"📝 示例:\n" +
-		"  .move 喷射火焰 @圈圈熊 优势 19          # 常规攻击（显示 d20优势）\n" +
+		"  .move 喷射火焰 @圈圈熊 优势 19          # 常规攻击\n" +
 		"  .move 喷射火焰 @圈圈熊 detail            # 显示简要计算\n" +
 		"  .move 喷射火焰 @圈圈熊 debug             # 显示完整计算\n" +
-		"  .move 剑舞 @自己                         # 强化自己\n" +
-		"  .move 剑舞                               # 默认强化自己\n" +
 		"  .move 治愈波动                          # 默认治疗自己\n" +
 		"  .move 种子机关枪 @圈圈熊                # 多段攻击\n" +
 		"\n" +
@@ -677,7 +640,8 @@ var cmdMove = &CmdItemInfo{
 		"\n" +
 		"💡 使用 .buff stat 查看当前战斗状态\n" +
 		"💡 PP消耗 = 环位 × 30，从角色总PP中扣除\n" +
-		"💡 使用 `.st ppmax:XXX` 设置最大PP，`.st pp:XXX` 设置当前PP\n" +
+		"💡 当 NPC HP 归零时自动从先攻列表移除\n" +
+		"💡 当玩家 HP 归零时自动提示使用 .ds 进行濒死豁免\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
 	AllowDelegate: true,
 	Solve: func(ctx *MsgContext, msg *Message, cmdArgs *CmdArgs) CmdExecuteResult {
@@ -812,12 +776,7 @@ var cmdMove = &CmdItemInfo{
 			newPP := pp - ppConsume
 			VarSetValueInt64(mctx, "pp", newPP)
 
-			ppmax, _ := VarGetValueInt64(mctx, "ppmax")
-			if ppmax > 0 {
-				ReplyToSender(mctx, msg, fmt.Sprintf("%s使用了%s！ PP: %d/%d", getPlayerNameTempFunc(mctx), name, newPP, ppmax))
-			} else {
-				ReplyToSender(mctx, msg, fmt.Sprintf("%s使用了%s！ PP: %d", getPlayerNameTempFunc(mctx), name, newPP))
-			}
+			ReplyToSender(mctx, msg, fmt.Sprintf("%s使用了%s！(非战斗使用) PP: %d", getPlayerNameTempFunc(mctx), name, newPP))
 
 		case "clr", "clear":
 			count := 0
@@ -915,36 +874,9 @@ var cmdMove = &CmdItemInfo{
 
 			// ---- 解析目标和参数 ----
 			attacker := mctx.Player.Name
-			targets, advantage, ctLimit, isGroupMode, detailMode, debugMode, hasUserTarget := parseMoveTargets(ctx, mctx, cmdArgs, attacker)
+			targets, advantage, ctLimit, isGroupMode, detailMode, debugMode := parseMoveTargets(ctx, mctx, cmdArgs, attacker)
 			categoryLower := strings.ToLower(category)
 
-			// ==========================================
-			// 目标默认值处理（仅当用户没有指定目标时）
-			// ==========================================
-			if !hasUserTarget {
-				if categoryLower == "治疗" || categoryLower == "heal" || categoryLower == "强化" || categoryLower == "buff" {
-					targets = []string{attacker}
-				} else {
-					// 伤害：从先攻列表取第一个非己单位
-					riList := (RIList{}).LoadByCurGroup(ctx)
-					for _, item := range riList {
-						if item.name != attacker {
-							targets = []string{item.name}
-							break
-						}
-					}
-					if len(targets) == 0 {
-						targets = []string{"目标"}
-					}
-				}
-			}
-
-			// 如果最终还是没有目标（防御性代码）
-			if len(targets) == 0 {
-				targets = []string{"目标"}
-			}
-
-			// ---- 验证目标 ----
 			if ok, errMsg := validateMoveTargets(categoryLower, targets, attacker, isGroupMode); !ok {
 				// 回滚PP
 				VarSetValueInt64(mctx, "pp", pp)
@@ -952,7 +884,15 @@ var cmdMove = &CmdItemInfo{
 				return CmdExecuteResult{Matched: true, Solved: true}
 			}
 
-			// ---- 根据类别分发 ----
+			if len(targets) == 0 {
+				if categoryLower == "治疗" || categoryLower == "heal" || categoryLower == "强化" || categoryLower == "buff" {
+					targets = []string{attacker}
+				} else {
+					targets = []string{"目标"}
+				}
+			}
+
+			// 根据类别分发
 			if categoryLower == "治疗" || categoryLower == "heal" {
 				if len(targets) > 1 {
 					VarSetValueInt64(mctx, "pp", pp)
